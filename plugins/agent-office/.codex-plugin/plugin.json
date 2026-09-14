@@ -1,0 +1,19 @@
+{
+  "name": "agent-office",
+  "version": "0.2.0",
+  "description": "Codex 작업과 실행 모델을 작은 3D 사무실에서 관찰합니다.",
+  "author": {
+    "name": "Agent Office contributors"
+  },
+  "skills": "./skills/",
+  "interface": {
+    "displayName": "작은회사 · Agent Office",
+    "shortDescription": "실제 에이전트들이 일하는 나만의 3D 사무실",
+    "longDescription": "프로젝트는 층으로, 채팅방은 작업 구역으로, 실제 에이전트는 직원으로 표시합니다. 로컬 상태 이벤트만 수집하며 프롬프트·코드 원문과 승인 제어 출력을 보내지 않습니다.",
+    "developerName": "Agent Office contributors",
+    "category": "Productivity",
+    "capabilities": [],
+    "defaultPrompt": "작은회사 사무실을 열고 Codex 연결 상태를 확인해주세요.",
+    "brandColor": "#294B3D"
+  }
+}

@@ -1,0 +1,8 @@
+{
+  "name": "agent-office-local",
+  "owner": { "name": "Agent Office contributors" },
+  "metadata": { "description": "Local Agent Office integration for Claude Code", "version": "0.2.4" },
+  "plugins": [
+    { "name": "agent-office", "source": "./integrations/claude-plugin", "version": "0.2.4", "description": "Claude Code 작업을 로컬 사무실에 표시합니다." }
+  ]
+}

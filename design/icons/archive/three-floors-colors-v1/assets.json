@@ -1,0 +1,20 @@
+[
+  {
+    "file": "A-cream-sage.png",
+    "width": 1254,
+    "height": 1254,
+    "sha256": "24443634e80a2c0f1ee4df1c17aa3a97c9707c4fee1a5228128363f50bbc2619"
+  },
+  {
+    "file": "B-navy-amber.png",
+    "width": 1254,
+    "height": 1254,
+    "sha256": "bcfa163d2d803d7ae2c162a67da4eedfdec89be5b5a51c3dbeef772683bb7d5f"
+  },
+  {
+    "file": "C-white-sky.png",
+    "width": 1254,
+    "height": 1254,
+    "sha256": "78fa59d6dc73470ea9b29ceafc642938fab6885f58c11cc73c86f666bfec7942"
+  }
+]

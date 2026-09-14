@@ -1,0 +1,48 @@
+{
+  "schemaVersion": 1,
+  "selected": "C-white-sky",
+  "pathBase": "repository root",
+  "method": "Approved C original RGB preserved; exterior alpha extracted by prepare-c-alpha.py; icon sizes converted by macOS sips and iconutil.",
+  "files": [
+    {
+      "path": "design/icons/archive/three-floors-colors-v1/C-white-sky.png",
+      "bytes": 1284853,
+      "sha256": "78fa59d6dc73470ea9b29ceafc642938fab6885f58c11cc73c86f666bfec7942"
+    },
+    {
+      "path": "design/icons/production/C-white-sky-transparent-source.png",
+      "bytes": 1333270,
+      "sha256": "3c8515ce77d71987d2e6834753af27ca9647faed8a1a237cc2ca8a89a04ee6ce"
+    },
+    {
+      "path": "desktop/macos/Assets/AppIcon.icns",
+      "bytes": 1458965,
+      "sha256": "ce1247dc0ca77a1929b39010c1fdbc753a22f4cc462d778533d92c611e83e403"
+    },
+    {
+      "path": "public/app-icon.png",
+      "bytes": 842285,
+      "sha256": "8e41da0af08eee70344595fabbbe938bf53bce827944731a1fddee9c07b345b2"
+    },
+    {
+      "path": "public/icons/app-icon-512.png",
+      "bytes": 228309,
+      "sha256": "ba5468435996d52f4a6a3856da6b8f5e8345887e003212de4b24bef8c3b14821"
+    },
+    {
+      "path": "public/icons/app-icon-192.png",
+      "bytes": 38818,
+      "sha256": "ea02ce012c3bf0a4abf49bc65b635bf1f07298ae1790e1854a2cd45a8d80fc2b"
+    },
+    {
+      "path": "public/icons/apple-touch-icon.png",
+      "bytes": 34927,
+      "sha256": "84766ec5fec8fb1aa91fac786f614732d38e12876e695300931f796338f82561"
+    },
+    {
+      "path": "public/icons/favicon-32.png",
+      "bytes": 2017,
+      "sha256": "bf4a33b545ed18e7fc282f460e5026b8aadf6b14a60a1334358199975b4a8879"
+    }
+  ]
+}

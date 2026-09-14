@@ -1,0 +1,3 @@
+# 전역 설정 자동 변경 없음. notify는 사용자 설정 또는 CLI -c에서만 적용하세요.
+# 프로젝트 .codex/config.toml의 notify는 현재 Codex에서 무시됩니다.
+notify = ["node", "/absolute/path/to/agent-office/scripts/codex-notify.mjs"]

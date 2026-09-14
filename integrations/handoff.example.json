@@ -1,0 +1,10 @@
+{
+  "source": "manual",
+  "type": "handoff",
+  "agentId": "research-team",
+  "agentName": "리서치팀",
+  "toAgentId": "engineering-team",
+  "toAgentName": "개발팀",
+  "title": "조사 자료 전달",
+  "taskId": "sample-task"
+}

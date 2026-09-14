@@ -1,0 +1,43 @@
+{
+  "name": "cubirumi",
+  "version": "0.3.0",
+  "private": true,
+  "description": "A local 3D office for observing Codex and Claude Code agents.",
+  "license": "MIT",
+  "repository": { "type": "git", "url": "https://github.com/techjuicelab/cubirumi.git" },
+  "homepage": "https://github.com/techjuicelab/cubirumi#readme",
+  "bugs": { "url": "https://github.com/techjuicelab/cubirumi/issues" },
+  "engines": {
+    "node": ">=22.18.0"
+  },
+  "type": "module",
+  "scripts": {
+    "dev": "node scripts/dev.mjs",
+    "web": "vite --host 127.0.0.1 --port 5173 --strictPort",
+    "bridge": "node server/index.mjs",
+    "start": "node scripts/runtime.mjs",
+    "observe:codex": "node scripts/codex-observer.mjs",
+    "observe:claude": "node scripts/claude-observer.mjs",
+    "desktop:install": "node scripts/install-desktop.mjs install",
+    "desktop:build": "node scripts/install-desktop.mjs build",
+    "desktop:package": "node scripts/package-desktop.mjs",
+    "release:prepare": "node scripts/prepare-release.mjs",
+    "release:export": "node scripts/export-public.mjs",
+    "icons:build": "node scripts/build-icons.mjs",
+    "build": "tsc --noEmit && vite build",
+    "preview": "vite preview --host 127.0.0.1 --port 4173 --strictPort",
+    "test": "node --test tests/*.test.mjs src/*.test.mjs",
+    "company": "node scripts/set-company.mjs",
+    "check:public": "node scripts/check-public.mjs",
+    "send-event": "node scripts/send-event.mjs"
+  },
+  "dependencies": {
+    "three": "0.186.0"
+  },
+  "devDependencies": {
+    "@types/three": "0.186.0",
+    "happy-dom": "20.14.5",
+    "typescript": "7.0.2",
+    "vite": "8.3.0"
+  }
+}

@@ -1,0 +1,9 @@
+{
+  "name": "agent-office",
+  "version": "0.2.4",
+  "description": "Claude Code의 작업 상태를 로컬 미니어처 사무실에 표시합니다.",
+  "author": {
+    "name": "Agent Office contributors"
+  },
+  "license": "MIT"
+}

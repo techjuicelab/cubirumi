@@ -1,0 +1,115 @@
+{
+  "description": "작업 메타데이터만 로컬 사무실에 전달합니다. 원문과 제어 출력은 전송하지 않습니다.",
+  "hooks": {
+    "SessionStart": [
+      {
+        "hooks": [
+          {
+            "type": "command",
+            "command": "node \"/absolute/path/to/agent-office/scripts/codex-hook.mjs\"",
+            "timeout": 3
+          }
+        ]
+      }
+    ],
+    "UserPromptSubmit": [
+      {
+        "hooks": [
+          {
+            "type": "command",
+            "command": "node \"/absolute/path/to/agent-office/scripts/codex-hook.mjs\"",
+            "timeout": 3
+          }
+        ]
+      }
+    ],
+    "SubagentStart": [
+      {
+        "hooks": [
+          {
+            "type": "command",
+            "command": "node \"/absolute/path/to/agent-office/scripts/codex-hook.mjs\"",
+            "timeout": 3
+          }
+        ]
+      }
+    ],
+    "SubagentStop": [
+      {
+        "hooks": [
+          {
+            "type": "command",
+            "command": "node \"/absolute/path/to/agent-office/scripts/codex-hook.mjs\"",
+            "timeout": 3
+          }
+        ]
+      }
+    ],
+    "PreToolUse": [
+      {
+        "hooks": [
+          {
+            "type": "command",
+            "command": "node \"/absolute/path/to/agent-office/scripts/codex-hook.mjs\"",
+            "timeout": 3
+          }
+        ]
+      }
+    ],
+    "PostToolUse": [
+      {
+        "hooks": [
+          {
+            "type": "command",
+            "command": "node \"/absolute/path/to/agent-office/scripts/codex-hook.mjs\"",
+            "timeout": 3
+          }
+        ]
+      }
+    ],
+    "PermissionRequest": [
+      {
+        "hooks": [
+          {
+            "type": "command",
+            "command": "node \"/absolute/path/to/agent-office/scripts/codex-hook.mjs\"",
+            "timeout": 3
+          }
+        ]
+      }
+    ],
+    "Stop": [
+      {
+        "hooks": [
+          {
+            "type": "command",
+            "command": "node \"/absolute/path/to/agent-office/scripts/codex-hook.mjs\"",
+            "timeout": 3
+          }
+        ]
+      }
+    ],
+    "Interrupt": [
+      {
+        "hooks": [
+          {
+            "type": "command",
+            "command": "node \"/absolute/path/to/agent-office/scripts/codex-hook.mjs\"",
+            "timeout": 3
+          }
+        ]
+      }
+    ],
+    "SessionEnd": [
+      {
+        "hooks": [
+          {
+            "type": "command",
+            "command": "node \"/absolute/path/to/agent-office/scripts/codex-hook.mjs\"",
+            "timeout": 3
+          }
+        ]
+      }
+    ]
+  }
+}

@@ -1,0 +1,27 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="512" height="512" viewBox="0 0 512 512" role="img" aria-labelledby="title">
+  <title id="title">Agent Office</title>
+  <rect width="512" height="512" fill="#dce9f2"/>
+  <ellipse cx="256" cy="384" rx="138" ry="18" fill="#b8cbd7"/>
+  <rect x="128" y="130" width="256" height="248" rx="28" fill="#a8bdcb"/>
+  <rect x="116" y="118" width="256" height="248" rx="28" fill="#f8faf8"/>
+  <path d="M144 118h200a28 28 0 0 1 28 28v22H116v-22a28 28 0 0 1 28-28Z" fill="#385465"/>
+  <rect x="145" y="138" width="62" height="10" rx="5" fill="#dce9f2"/>
+  <circle cx="340" cy="143" r="6" fill="#98c9b1"/>
+  <g fill="#e1eaf0">
+    <rect x="142" y="192" width="56" height="60" rx="10"/>
+    <rect x="216" y="192" width="56" height="60" rx="10"/>
+    <rect x="290" y="192" width="56" height="60" rx="10"/>
+    <rect x="142" y="270" width="56" height="60" rx="10"/>
+    <rect x="216" y="270" width="56" height="60" rx="10"/>
+    <rect x="290" y="270" width="56" height="60" rx="10"/>
+  </g>
+  <rect x="142" y="192" width="56" height="60" rx="10" fill="#98c9b1"/>
+  <rect x="290" y="270" width="56" height="60" rx="10" fill="#f3c97b"/>
+  <g fill="#385465">
+    <circle cx="170" cy="215" r="7"/>
+    <path d="M157 239v-4a13 13 0 0 1 26 0v4Z"/>
+    <circle cx="318" cy="293" r="7"/>
+    <path d="M305 317v-4a13 13 0 0 1 26 0v4Z"/>
+  </g>
+  <path d="M228 352h32" stroke="#a8bdcb" stroke-width="7" stroke-linecap="round"/>
+</svg>

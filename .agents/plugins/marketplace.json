@@ -1,0 +1,20 @@
+{
+  "name": "agent-office-community",
+  "interface": {
+    "displayName": "Agent Office Community"
+  },
+  "plugins": [
+    {
+      "name": "agent-office",
+      "source": {
+        "source": "local",
+        "path": "./plugins/agent-office"
+      },
+      "policy": {
+        "installation": "AVAILABLE",
+        "authentication": "ON_INSTALL"
+      },
+      "category": "Productivity"
+    }
+  ]
+}

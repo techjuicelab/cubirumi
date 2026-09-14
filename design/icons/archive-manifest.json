@@ -1,0 +1,156 @@
+{
+  "schemaVersion": 1,
+  "archivedOn": "2026-09-13",
+  "selected": "C-white-sky",
+  "selectedPath": "archive/three-floors-colors-v1/C-white-sky.png",
+  "darkModeCandidate": "B-navy-amber",
+  "darkModeCandidatePath": "archive/three-floors-colors-v1/B-navy-amber.png",
+  "automaticIconSwitchingImplemented": false,
+  "preservation": {
+    "initialConcepts": 6,
+    "colorVariants": 3,
+    "pngCount": 9,
+    "originalArtifactsPreserved": true,
+    "copiedFilesUnmodified": true,
+    "legacySvgCount": 3
+  },
+  "pathBase": {
+    "source": "repository root",
+    "path": "design/icons"
+  },
+  "hashScope": "Every preserved archive and legacy file; this manifest and the archive overview README are excluded.",
+  "files": [
+    {
+      "source": "artifacts/icon-concepts/2026-09-13/01-mini-office.png",
+      "path": "archive/2026-09-13/01-mini-office.png",
+      "bytes": 1619347,
+      "sha256": "4bf7505f9bc972fb694b02585fe0b181f0c6b94b2ce07c0b9d5c4f7069795719",
+      "width": 1254,
+      "height": 1254
+    },
+    {
+      "source": "artifacts/icon-concepts/2026-09-13/02-paper-plane.png",
+      "path": "archive/2026-09-13/02-paper-plane.png",
+      "bytes": 1380877,
+      "sha256": "a860f365264d28b83b797549fbe75757d3e8f00eaf190b20f04ea4e4fc0e1465",
+      "width": 1254,
+      "height": 1254
+    },
+    {
+      "source": "artifacts/icon-concepts/2026-09-13/03-desk-buddy.png",
+      "path": "archive/2026-09-13/03-desk-buddy.png",
+      "bytes": 1355736,
+      "sha256": "27db6faa4cffee5d6187184cfed3e04923f8f1b8f136fe7065bd365bcdc3054e",
+      "width": 1254,
+      "height": 1254
+    },
+    {
+      "source": "artifacts/icon-concepts/2026-09-13/04-three-floors.png",
+      "path": "archive/2026-09-13/04-three-floors.png",
+      "bytes": 1372351,
+      "sha256": "dc59437e79bbfda004d60a23b1caecee1bda724c4bb5bc411de1ac5c5a106526",
+      "width": 1254,
+      "height": 1254
+    },
+    {
+      "source": "artifacts/icon-concepts/2026-09-13/05-office-camera.png",
+      "path": "archive/2026-09-13/05-office-camera.png",
+      "bytes": 1810077,
+      "sha256": "3558f8d4a1d86e895fe2046daaa86796f27f6619f86cf699b4924c2bf39d2658",
+      "width": 1254,
+      "height": 1254
+    },
+    {
+      "source": "artifacts/icon-concepts/2026-09-13/06-team-keys.png",
+      "path": "archive/2026-09-13/06-team-keys.png",
+      "bytes": 1621966,
+      "sha256": "7ee38fe6769de6db495884df3a2b965130bcb5c4ef7bb0605439675f37618f99",
+      "width": 1254,
+      "height": 1254
+    },
+    {
+      "source": "artifacts/icon-concepts/2026-09-13/README.md",
+      "path": "archive/2026-09-13/README.md",
+      "bytes": 988,
+      "sha256": "1c1ce2888be495a72daa2ff43975197a0df4498ef74d79a391aa4aef0e806946"
+    },
+    {
+      "source": "artifacts/icon-concepts/2026-09-13/index.html",
+      "path": "archive/2026-09-13/index.html",
+      "bytes": 21601,
+      "sha256": "6b37fbd0b3932e12443d471bd60017a527d4939457b519a8c82a5022f94e78ee"
+    },
+    {
+      "source": "artifacts/icon-concepts/2026-09-13/prompts.json",
+      "path": "archive/2026-09-13/prompts.json",
+      "bytes": 7856,
+      "sha256": "40116b0587b9b7b09bce9abd38f12a9d0b1403b57bf01317598499d91f95c88e"
+    },
+    {
+      "source": "artifacts/icon-concepts/three-floors-colors-v1/A-cream-sage.png",
+      "path": "archive/three-floors-colors-v1/A-cream-sage.png",
+      "bytes": 1296741,
+      "sha256": "24443634e80a2c0f1ee4df1c17aa3a97c9707c4fee1a5228128363f50bbc2619",
+      "width": 1254,
+      "height": 1254
+    },
+    {
+      "source": "artifacts/icon-concepts/three-floors-colors-v1/B-navy-amber.png",
+      "path": "archive/three-floors-colors-v1/B-navy-amber.png",
+      "bytes": 1396706,
+      "sha256": "bcfa163d2d803d7ae2c162a67da4eedfdec89be5b5a51c3dbeef772683bb7d5f",
+      "width": 1254,
+      "height": 1254
+    },
+    {
+      "source": "artifacts/icon-concepts/three-floors-colors-v1/C-white-sky.png",
+      "path": "archive/three-floors-colors-v1/C-white-sky.png",
+      "bytes": 1284853,
+      "sha256": "78fa59d6dc73470ea9b29ceafc642938fab6885f58c11cc73c86f666bfec7942",
+      "width": 1254,
+      "height": 1254
+    },
+    {
+      "source": "artifacts/icon-concepts/three-floors-colors-v1/README.md",
+      "path": "archive/three-floors-colors-v1/README.md",
+      "bytes": 1145,
+      "sha256": "73d0dd980373b611fd1338753fbddf6facb22ad1534e3867db296fa7513c430e"
+    },
+    {
+      "source": "artifacts/icon-concepts/three-floors-colors-v1/assets.json",
+      "path": "archive/three-floors-colors-v1/assets.json",
+      "bytes": 485,
+      "sha256": "080eb0ff0539b8ab44fe5bdd0c55e9b85a2dc87848aa6d207d49bf31a58369de"
+    },
+    {
+      "source": "artifacts/icon-concepts/three-floors-colors-v1/index.html",
+      "path": "archive/three-floors-colors-v1/index.html",
+      "bytes": 5907,
+      "sha256": "09001011bfe493bf46f688c1fc3ecb7fda373d75b2ed5606ecf810110065ccc4"
+    },
+    {
+      "source": "artifacts/icon-concepts/three-floors-colors-v1/prompts.json",
+      "path": "archive/three-floors-colors-v1/prompts.json",
+      "bytes": 6489,
+      "sha256": "88c38ae92004eafe2b09db2fb4934d63e7c862d6fa39a33ae956b8c865d15cbb"
+    },
+    {
+      "source": "public/app-icon.svg",
+      "path": "legacy/public-app-icon.svg",
+      "bytes": 1453,
+      "sha256": "6ef48a9c4001beabf4a08cc8d5da0262645ae3040a0431e52d2262ea004f3c3e"
+    },
+    {
+      "source": "public/favicon.svg",
+      "path": "legacy/public-favicon.svg",
+      "bytes": 298,
+      "sha256": "1fef90bfb79c37461ffab768c9b9d5f49ba85072e521c436867b93eceac70819"
+    },
+    {
+      "source": "plugins/agent-office/assets/icon.svg",
+      "path": "legacy/plugin-agent-office-icon.svg",
+      "bytes": 298,
+      "sha256": "1fef90bfb79c37461ffab768c9b9d5f49ba85072e521c436867b93eceac70819"
+    }
+  ]
+}

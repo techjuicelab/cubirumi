@@ -1,0 +1,41 @@
+{
+  "mode": "Built-in image generation",
+  "concepts": [
+    {
+      "id": "01-mini-office",
+      "title": "미니어처 사무실",
+      "prompt": "Create one polished macOS app icon concept for Agent Office, a delightful 3D game-like observer of AI employees working in miniature offices. Exactly one centered icon, 1024x1024 square canvas. Proper macOS continuous rounded-square tile, inset 10% from canvas edges, all visual content contained within it with subtle cast shadow. Isolated on an extremely light neutral background. Professional premium art-directed toy-like 3D rendering, precise silhouette that reads at 32px, clean focal point, restrained detail, no lettering, no words, no numbers, no company name, no logos, no watermark. This is the actual icon asset, not a device mockup or presentation sheet. A warm ivory ceramic rounded-square tile holds a single cutaway miniature office corner. One tiny mint desk with a dark monitor and one round-headed seated employee in a mustard chair, viewed isometrically, two short translucent pale-blue walls create a tiny room. The desk and worker form one large legible composition, cute tangible wooden dollhouse materials, warm cream and sage green accents. No ceiling, no extra objects.",
+      "file": "01-mini-office.png"
+    },
+    {
+      "id": "02-paper-plane",
+      "title": "종이비행기",
+      "prompt": "Create one polished macOS app icon concept for Agent Office, a delightful 3D game-like observer of AI employees working in miniature offices. Exactly one centered icon, 1024x1024 square canvas. Proper macOS continuous rounded-square tile, inset 10% from canvas edges, all visual content contained within it with subtle cast shadow. Isolated on an extremely light neutral background. Professional premium art-directed toy-like 3D rendering, precise silhouette that reads at 32px, clean focal point, restrained detail, no lettering, no words, no numbers, no company name, no logos, no watermark. This is the actual icon asset, not a device mockup or presentation sheet. A bold beautiful folded white paper airplane crossing diagonally upward-right, floating just above a deep ink-blue glossy enamel rounded-square tile. The aircraft has crisp realistic folds and an icy-blue underside, thick tactile 3D paper edges. A very small mint curved flight trail with two luminous endpoint dots suggests messages traveling between employees. Strong dynamic silhouette, minimal composition, beautiful controlled lighting, blue and white palette. No office room, no text.",
+      "file": "02-paper-plane.png"
+    },
+    {
+      "id": "03-desk-buddy",
+      "title": "책상 친구",
+      "prompt": "Create one polished macOS app icon concept for Agent Office, a delightful 3D game-like observer of AI employees working in miniature offices. Exactly one centered icon, 1024x1024 square canvas. Proper macOS continuous rounded-square tile, inset 10% from canvas edges, all visual content contained within it with subtle cast shadow. Isolated on an extremely light neutral background. Professional premium art-directed toy-like 3D rendering, precise silhouette that reads at 32px, clean focal point, restrained detail, no lettering, no words, no numbers, no company name, no logos, no watermark. This is the actual icon asset, not a device mockup or presentation sheet. An adorable rounded cream-colored office robot with a broad dark navy visor and exactly two small mint eyes, seated behind a small coral keyboard, both hands visibly typing. Portrait composition large head and small shoulders, friendly collectible vinyl toy material. Inside a warm apricot rounded-square macOS tile, soft studio lighting, gentle tactile shadows. No human face, no letters, no logos, no building; friendly character mascot identity.",
+      "file": "03-desk-buddy.png"
+    },
+    {
+      "id": "04-three-floors",
+      "title": "세 층의 회사",
+      "prompt": "Create one polished macOS app icon concept for Agent Office, a delightful 3D game-like observer of AI employees working in miniature offices. Exactly one centered icon, 1024x1024 square canvas. Proper macOS continuous rounded-square tile, inset 10% from canvas edges, all visual content contained within it with subtle cast shadow. Isolated on an extremely light neutral background. Professional premium art-directed toy-like 3D rendering, precise silhouette that reads at 32px, clean focal point, restrained detail, no lettering, no words, no numbers, no company name, no logos, no watermark. This is the actual icon asset, not a device mockup or presentation sheet. A compact vertical three-story miniature glass office building, almost front-facing with slight isometric depth, fits inside an icy lilac rounded-square tile. Each floor has exactly one broad glowing window and a simple tiny desk silhouette; all three floors visibly separated by lavender slabs. Mint, butter yellow, and coral window interiors suggest different teams. Premium frosted acrylic architectural model, clean chunky geometry, strongly readable stepped building silhouette, very few details.",
+      "file": "04-three-floors.png"
+    },
+    {
+      "id": "05-office-camera",
+      "title": "오피스 렌즈",
+      "prompt": "Create one polished macOS app icon concept for Agent Office, a delightful 3D game-like observer of AI employees working in miniature offices. Exactly one centered icon, 1024x1024 square canvas. Proper macOS continuous rounded-square tile, inset 10% from canvas edges, all visual content contained within it with subtle cast shadow. Isolated on an extremely light neutral background. Professional premium art-directed toy-like 3D rendering, precise silhouette that reads at 32px, clean focal point, restrained detail, no lettering, no words, no numbers, no company name, no logos, no watermark. This is the actual icon asset, not a device mockup or presentation sheet. A single chunky translucent sky-blue CCTV camera lens facing the viewer on a softly rounded pale silver-blue square tile. Within its large dark glass central circular lens, an elegantly simplified glowing miniature mint desk and tiny warm lamp are visible as an optical reflection. Compact modern industrial form, glass depth and soft metallic rim, approachable rather than surveillance-threatening, precise restrained 3D rendering. Camera-lens circle dominates the silhouette, no camera tripod, no lettering.",
+      "file": "05-office-camera.png"
+    },
+    {
+      "id": "06-team-keys",
+      "title": "팀 키캡",
+      "prompt": "Create one polished macOS app icon concept for Agent Office, a delightful 3D game-like observer of AI employees working in miniature offices. Exactly one centered icon, 1024x1024 square canvas. Proper macOS continuous rounded-square tile, inset 10% from canvas edges, all visual content contained within it with subtle cast shadow. Isolated on an extremely light neutral background. Professional premium art-directed toy-like 3D rendering, precise silhouette that reads at 32px, clean focal point, restrained detail, no lettering, no words, no numbers, no company name, no logos, no watermark. This is the actual icon asset, not a device mockup or presentation sheet. Three chunky premium mechanical keyboard keycaps arranged as a playful triangular cluster on a deep desaturated plum rounded-square macOS tile. The largest lower central keycap is mint and carries a simple raised miniature office desk-and-monitor glyph made from the same ceramic material; two smaller cream and peach keycaps each carry a single friendly abstract worker head glyph. A thin luminous curved connection joins them, showing collaborative agents. Macro tactile matte ceramic, bevels, distinctive overhead near-isometric composition, simple high contrast, no letters or symbols resembling existing brands.",
+      "file": "06-team-keys.png"
+    }
+  ]
+}

@@ -1,0 +1,94 @@
+name: Desktop release
+on:
+  push:
+    tags: ['v*']
+permissions:
+  contents: read
+concurrency:
+  group: desktop-release
+  cancel-in-progress: false
+jobs:
+  package:
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - arch: arm64
+            runner: macos-15
+          - arch: x64
+            runner: macos-15-intel
+    runs-on: ${{ matrix.runner }}
+    timeout-minutes: 25
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
+        with:
+          node-version: 24.20.0
+          cache: npm
+      - name: Verify release identity
+        run: |
+          node --input-type=module <<'NODE'
+          import { readFileSync } from 'node:fs';
+          const pkg = JSON.parse(readFileSync('package.json'));
+          const config = JSON.parse(readFileSync('desktop/release.json'));
+          if (process.env.GITHUB_REF_NAME !== `v${pkg.version}` || process.env.GITHUB_REPOSITORY !== config.repository) throw new Error('Tag, version, and repository must match release configuration.');
+          NODE
+      - run: npm ci
+      - run: npm run check:public
+      - run: npm test
+      - name: Build standalone app
+        env:
+          TARGET_ARCH: ${{ matrix.arch }}
+        run: |
+          node --input-type=module <<'NODE'
+          import { appendFileSync } from 'node:fs';
+          import { packageDesktop } from './scripts/package-desktop.mjs';
+          const result = await packageDesktop({ arch: process.env.TARGET_ARCH, release: true });
+          appendFileSync(process.env.GITHUB_ENV, `PACKAGE_DIRECTORY=${result.directory}\n`);
+          NODE
+      - name: Sign and verify archive and update feed
+        env:
+          SPARKLE_PRIVATE_KEY: ${{ secrets.SPARKLE_PRIVATE_KEY }}
+        run: node scripts/prepare-release.mjs "$PACKAGE_DIRECTORY"
+      - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
+        with:
+          name: signed-desktop-${{ matrix.arch }}
+          path: artifacts/releases/*/*
+          if-no-files-found: error
+          retention-days: 7
+  publish:
+    needs: package
+    runs-on: ubuntu-24.04
+    timeout-minutes: 10
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093 # v4
+        with:
+          pattern: signed-desktop-*
+          path: downloads
+          merge-multiple: true
+      - name: Assemble and verify both architectures
+        run: |
+          mkdir release-assets
+          find downloads -type f -exec cp -n {} release-assets/ \;
+          test "$(find release-assets -type f | wc -l)" -eq 6
+          cd release-assets
+          shasum -a 256 --check SHA256SUMS-arm64.txt SHA256SUMS-x64.txt
+      - name: Publish complete release
+        env:
+          GH_TOKEN: ${{ github.token }}
+          GH_REPO: ${{ github.repository }}
+          RELEASE_TAG: ${{ github.ref_name }}
+        run: |
+          cat > release-notes.md <<'NOTES'
+          Cubirumi macOS 다운로드판입니다. macOS 13.5 이상에서 Apple Silicon은 arm64, Intel은 x64 ZIP을 선택하세요.
+
+          ZIP을 풀고 Cubirumi.app을 응용 프로그램 폴더로 옮겨 실행합니다. Apple Developer ID 공증이 없으므로 최초 실행 시 시스템 설정 → 개인정보 보호 및 보안에서 앱별 실행 허용이 필요할 수 있습니다.
+
+          Node와 서버가 포함되어 있으며 서명된 자동 업데이트를 지원합니다. 새 버전은 자동 확인·다운로드 후 앱 종료 시 적용됩니다. 설치·Claude 연결 안내는 저장소의 docs/DESKTOP.md를 참고하세요.
+          NOTES
+          gh release create "$RELEASE_TAG" release-assets/* --verify-tag --draft --title "Cubirumi $RELEASE_TAG" --notes-file release-notes.md
+          gh release edit "$RELEASE_TAG" --draft=false --latest
