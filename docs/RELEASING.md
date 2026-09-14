@@ -1,6 +1,6 @@
 # macOS 다운로드판과 업데이트 배포
 
-이 문서는 Cubirumi의 공개 후보 파일을 만드는 개발자용 안내입니다. 배포 저장소 [techjuicelab/cubirumi](https://github.com/techjuicelab/cubirumi)와 Sparkle 공개키는 설정되어 있으며 공개 릴리스는 준비 중입니다. 신규 Mac의 다운로드·첫 실행과 공개 피드에서 이전 버전을 새 버전으로 바꾸는 전체 흐름은 아직 검증하지 않았습니다.
+이 문서는 Cubirumi의 공개 후보 파일을 만드는 개발자용 안내입니다. 배포 저장소 [techjuicelab/cubirumi](https://github.com/techjuicelab/cubirumi)와 Sparkle 공개키를 사용합니다. 신규 Mac의 다운로드·첫 실행과 공개 피드에서 이전 버전을 새 버전으로 바꾸는 전체 흐름은 아직 검증하지 않았습니다.
 
 ## 배포 구성
 
@@ -46,7 +46,7 @@ npm run desktop:package -- --arch x64 --release
 
 ## 1Password로 서명 키 주입
 
-Ed25519 비밀키는 배포자 1Password의 항목을 기준으로 관리합니다. 현재 배포키는 생성·보관과 공개키 등록을 마쳤으며 1Password에서 다시 읽어 공개키와의 일치를 확인했습니다. 비밀키를 저장소·명령 인수·릴리스 설명·로그에 넣지 않습니다. 앱에는 대응하는 공개키만 넣습니다. 포크에서 별도 앱을 배포할 때는 자신의 키와 저장소를 설정합니다.
+Ed25519 비밀키는 배포자 1Password의 항목을 기준으로 관리합니다. 현재 배포키는 생성·보관과 공개키 등록을 마쳤으며 1Password에서 다시 읽어 공개키와의 일치를 확인했습니다. 비밀키를 저장소·명령 인수·릴리스 설명·로그에 넣지 않습니다. 앱에는 대응하는 공개키만 넣습니다. 포크에서 별도 앱을 배포할 때는 자신의 키와 저장소를 설정합니다. 현재처럼 Developer ID 없이 배포하는 ZIP은 서명키를 분실하면 기존 설치의 자동 업데이트 경로를 복구하기 어려울 수 있습니다. 기존 키를 보관하고, 공개키 교체는 Sparkle의 키 교체 절차를 별도로 검증한 뒤 진행합니다.
 
 1Password에서 해당 필드의 **Copy Secret Reference**로 복사한 `op://` 참조를 배포자 전용 `env/release.op.env` 파일에 적습니다. 공개 파일 [env/release.op.env.example](../env/release.op.env.example)은 형식 예시이며 실제 만들어 둔 항목의 참조로 바꿉니다. `env/release.op.env`는 Git에서 제외합니다. 참조 파일에는 비밀키 값을 적지 않습니다.
 
@@ -87,7 +87,7 @@ https://github.com/techjuicelab/cubirumi/releases/latest/download/appcast-x64.xm
 
 피드의 ZIP 주소는 `releases/download/v<버전>/<파일명>`을 가리킵니다. 공개되지 않은 초안·미리보기 릴리스를 정식 `latest` 업데이트 경로와 혼동하지 않습니다. [GitHub Release 관리 안내](https://docs.github.com/en/repositories/releasing-projects-on-github/managing-releases-in-a-repository)
 
-## 공개 전에 확인할 사용자 흐름
+## 출시 검증과 남은 사용자 흐름
 
 - Node.js와 기존 소스 서버가 없는 Mac에서 ZIP을 다운로드하고 첫 실행을 허용해 사무실이 열리는지 확인합니다.
 - 두 아키텍처는 각각 실제 대상 Mac에서 시작·관측·종료를 확인합니다. 교차 컴파일만으로 대상 기기 검증을 대신하지 않습니다.

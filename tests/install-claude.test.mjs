@@ -14,16 +14,22 @@ async function temporary(t) {
   t.after(() => rm(directory, { recursive: true, force: true }));
   return directory;
 }
-function runHook(command, env) {
+function runHook(command, env, input = JSON.stringify({ hook_event_name: 'SessionStart', session_id: 'fixture-session', cwd: '/fixture/project' })) {
   return new Promise((resolve, reject) => {
     const child = spawn('/bin/sh', ['-c', command], { env: { ...process.env, NODE_OPTIONS: '', NODE_PATH: '', ...env }, stdio: ['pipe', 'pipe', 'pipe'] });
     let stdout = '', stderr = '';
     const timer = setTimeout(() => { child.kill(); reject(new Error('Hook process timeout')); }, 5000);
     child.stdout.on('data', value => { stdout += value; }); child.stderr.on('data', value => { stderr += value; });
     child.on('error', reject); child.on('close', code => { clearTimeout(timer); resolve({ code, stdout, stderr }); });
-    child.stdin.end(JSON.stringify({ hook_event_name: 'SessionStart', session_id: 'fixture-session', cwd: '/fixture/project' }));
+    child.stdin.on('error', error => { if (error.code !== 'EPIPE') reject(error); });
+    child.stdin.end(input);
   });
 }
+
+test('the hook runner reports an early exit while stdin is still being written', async () => {
+  const result = await runHook('exit 127', {}, 'x'.repeat(1024 * 1024));
+  assert.deepEqual(result, { code: 127, stdout: '', stderr: '' });
+});
 
 test('a cached bundled Claude hook runs without PATH Node and leaves source hooks unchanged', { timeout: 10000 }, async t => {
   const directory = await temporary(t), dataDir = join(directory, 'private');

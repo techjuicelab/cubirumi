@@ -25,7 +25,7 @@ Codex와 Claude Code의 작업을 귀여운 미니어처 사무실로 보여주�
 
 다운로드판은 `.app` 안에 Node.js와 사무실 서버, 웹 화면을 함께 포함합니다. 사용자는 Node.js·npm·저장소를 설치하지 않고 앱을 실행할 수 있습니다. macOS **13.5 이상**을 대상으로 하며 Apple Silicon은 `arm64`, Intel Mac은 `x64` ZIP을 사용합니다.
 
-현재는 [techjuicelab/cubirumi](https://github.com/techjuicelab/cubirumi)에서 공개 릴리스를 준비하는 단계입니다. 업데이트 공개키는 설정되어 있으며 다운로드·자동 업데이트가 가능한 공개 버전은 아직 없습니다. 공개 후에는 [GitHub Releases](https://github.com/techjuicelab/cubirumi/releases)의 ZIP을 풀어 `Cubirumi.app`을 응용 프로그램 폴더에 옮기는 방식으로 설치합니다. 첫 실행 허용, 업데이트와 기존 개발 설치에서의 전환은 [macOS 설치 안내](docs/DESKTOP.md)를 참고하세요.
+[GitHub Releases](https://github.com/techjuicelab/cubirumi/releases)에서 Mac에 맞는 ZIP을 내려받아 풀고 `Cubirumi.app`을 응용 프로그램 폴더에 옮깁니다. 서명된 자동 업데이트를 지원합니다. 첫 실행 허용, 업데이트와 기존 개발 설치에서의 전환은 [macOS 설치 안내](docs/DESKTOP.md)를 참고하세요. 초기 공개판이며 신규 Mac의 Gatekeeper 첫 실행과 실제 제품의 버전 간 업데이트는 추가 검증이 필요합니다.
 
 ## 소스에서 빠른 시작
 

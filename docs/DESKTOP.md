@@ -6,7 +6,7 @@ Cubirumi(큐비루미)를 주소창 없는 독립 창으로 띄웁니다. 창 �
 
 다운로드판은 macOS **13.5 이상**에서 실행하는 앱입니다. Node.js·사무실 서버·웹 화면·업데이트 구성요소를 `.app` 안에 포함하며, 사용자에게 npm이나 Xcode 설치를 요구하지 않습니다. 3D 화면은 macOS 기본 WebKit으로 표시합니다.
 
-배포 저장소 [techjuicelab/cubirumi](https://github.com/techjuicelab/cubirumi)와 업데이트 공개키는 설정되어 있으며 공개 릴리스는 준비 중입니다. 아래는 공개 릴리스가 준비된 뒤의 설치 절차이며, 신규 Mac의 다운로드·첫 실행과 공개 서버를 통한 버전 간 업데이트는 아직 검증하지 않았습니다.
+배포 파일은 [techjuicelab/cubirumi의 GitHub Releases](https://github.com/techjuicelab/cubirumi/releases)에서 제공합니다. 신규 Mac의 Gatekeeper 첫 실행과 공개 서버를 통한 실제 제품의 버전 간 업데이트는 아직 별도 검증이 필요합니다.
 
 1. [GitHub Releases](https://github.com/techjuicelab/cubirumi/releases)에서 Mac에 맞는 ZIP을 내려받습니다. Apple Silicon은 `arm64`, Intel Mac은 `x64`입니다.
 2. ZIP을 풀고 `Cubirumi.app`을 응용 프로그램 폴더에 옮긴 뒤 실행합니다.
