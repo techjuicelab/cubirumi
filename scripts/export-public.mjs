@@ -9,7 +9,7 @@ const documents = new Set([
   'ACTIVITY_ANIMATIONS.md', 'CLAUDE_SETUP_PROMPT.md', 'CLAUDE_VERIFY_PROMPT.md',
   'COMMUNICATION.md', 'DESKTOP.md', 'INTEGRATIONS.md', 'USAGE.md', 'RELEASING.md',
 ]);
-const rootFiles = new Set(['.gitignore', 'CONTRIBUTING.md', 'LICENSE', 'README.md', 'SECURITY.md',
+const rootFiles = new Set(['.gitignore', 'CONTRIBUTING.md', 'LICENSE', 'README.md', 'README.kr.md', 'SECURITY.md',
   'index.html', 'package.json', 'package-lock.json', 'tsconfig.json', 'vite.config.ts']);
 const roots = new Set(['.agents', '.claude-plugin', '.github', 'design', 'desktop', 'integrations', 'plugins', 'public', 'scripts', 'server', 'src', 'tests']);
 
