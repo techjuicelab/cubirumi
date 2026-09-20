@@ -1,6 +1,27 @@
 # Cubirumi (큐비루미)
 
+**AI 에이전트들이 일하는 나만의 작은 사무실.**
+
 Codex와 Claude Code의 작업을 귀여운 미니어처 사무실로 보여주는 로컬 오픈소스 앱입니다. 프로젝트는 층, 채팅은 작업구역, 에이전트는 직원이 됩니다. 화면과 안내는 현재 한국어입니다.
+
+**[macOS 앱 다운로드](https://github.com/techjuicelab/cubirumi/releases/latest)** · [설치 및 연결 안내](docs/DESKTOP.md) · [소스에서 실행](#소스에서-빠른-시작)
+
+macOS 13.5 이상 · Apple Silicon / Intel · MIT 오픈소스
+
+<p align="center">
+  <img src="design/previews/office-team.png" alt="Claude Code 직원 세 명이 각자의 책상에서 일하는 실제 사용 화면. 캐릭터 위에 모델 이름과 업무 상태가 표시됩니다." width="720">
+</p>
+
+**누가 일하고 있는지, 어떤 작업을 하는지 한눈에.** 직원을 가까이에서 보거나, 자동 관찰을 켜고 작은 사무실을 천천히 둘러보세요.
+
+### 한 층부터 건물 전체까지
+
+| 프로젝트마다 한 층씩 | 내 팀의 사무실을 한눈에 |
+| --- | --- |
+| ![세 프로젝트를 층별로 보여주는 3D 건물 전체 화면](design/previews/office-building.png) | ![같은 프로젝트의 직원들과 업무 상태를 보여주는 사무실 전체 화면](design/previews/office-overview.png) |
+| 여러 프로젝트의 작업을 건물 전체에서 살펴봅니다. | 층을 선택해 팀장과 직원들의 활동을 가까이에서 봅니다. |
+
+<sub>개발용 Agent Office에서 촬영한 실제 사용 화면이며, 공개 앱 이름은 Cubirumi입니다. 화면의 ‘쉬는 층 숨기기’는 v0.3.0에 아직 포함되지 않은 개발 중 기능입니다.</sub>
 
 ## 무엇을 볼 수 있나요?
 
