@@ -1,5 +1,5 @@
 <p align="center">
-  <img src="public/icons/app-icon-512.png" width="256" height="256" alt="Cubirumi app icon">
+  <img src="design/icons/production/C-white-sky-transparent-source.png" width="256" height="256" alt="Cubirumi app icon">
 </p>
 
 # Cubirumi

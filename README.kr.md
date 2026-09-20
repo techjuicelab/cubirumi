@@ -1,5 +1,5 @@
 <p align="center">
-  <img src="public/icons/app-icon-512.png" alt="큐비루미 앱 아이콘" width="256" height="256">
+  <img src="design/icons/production/C-white-sky-transparent-source.png" alt="큐비루미 앱 아이콘" width="256" height="256">
 </p>
 
 # Cubirumi (큐비루미)
