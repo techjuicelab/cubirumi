@@ -1,6 +1,6 @@
 # macOS 다운로드판과 업데이트 배포
 
-이 문서는 Cubirumi의 공개 후보 파일을 만드는 개발자용 안내입니다. 배포 저장소 [techjuicelab/cubirumi](https://github.com/techjuicelab/cubirumi)와 Sparkle 공개키를 사용합니다. 신규 Mac의 다운로드·첫 실행과 공개 피드에서 이전 버전을 새 버전으로 바꾸는 전체 흐름은 아직 검증하지 않았습니다.
+이 문서는 Cubirumi의 공개 후보 파일을 만드는 개발자용 안내입니다. 배포 저장소 [techjuicelab/cubirumi](https://github.com/techjuicelab/cubirumi)와 Sparkle 공개키를 사용합니다. v0.3.1에서는 Apple Silicon Mac에서 공개 피드를 통한 v0.3.0 → v0.3.1 업데이트·재실행과 기존 설정·기록 저장소 유지를 확인했습니다. 신규 Mac의 다운로드·Gatekeeper 첫 실행과 실제 Intel Mac에서의 동작은 별도 검증이 필요합니다.
 
 ## 배포 구성
 
@@ -74,7 +74,7 @@ ZIP을 서명한 뒤 다시 압축하거나 수정하면 안 됩니다. 바뀐 �
 
 ## GitHub Release 게시
 
-`desktop:package`·`release:prepare` 명령은 로컬 파일만 만듭니다. GitHub에 `v<major.minor.patch>` 태그를 push하면 [release.yml](../.github/workflows/release.yml)이 **정식 릴리스 게시까지 자동으로 수행**합니다. 태그는 루트 `package.json`의 버전, 저장소는 `desktop/release.json`의 값과 일치해야 합니다. 첫 실행 전에 1Password의 키를 GitHub Actions의 `SPARKLE_PRIVATE_KEY` secret에 배포용 복사본으로 등록합니다.
+`desktop:package`·`release:prepare` 명령은 로컬 파일만 만듭니다. GitHub에 `v<major.minor.patch>` 태그를 push하면 [release.yml](../.github/workflows/release.yml)이 **정식 릴리스 게시까지 자동으로 수행**합니다. 태그는 루트 `package.json`의 버전, 저장소는 `desktop/release.json`의 값과 일치해야 합니다. 태그를 push하기 전에 해당 버전의 `docs/releases/v<버전>.md`를 작성하세요. 게시 작업은 태그의 이 문서를 릴리스 설명으로 사용하며, 파일이 없으면 게시하지 않습니다. 첫 실행 전에 1Password의 키를 GitHub Actions의 `SPARKLE_PRIVATE_KEY` secret에 배포용 복사본으로 등록합니다.
 
 워크플로는 Apple Silicon과 Intel의 macOS runner에서 각각 공개 파일 검사·테스트·패키징·서명을 수행합니다. 양쪽 작업이 모두 성공하면 ZIP·피드·해시 총 6개 파일을 모아 해시를 검증하고, 한 Release의 초안에 파일을 올린 뒤 정식 `latest` 릴리스로 공개합니다. 한쪽 아키텍처가 실패하면 게시 단계는 진행하지 않습니다. 앱의 실제 설치·시각 검수·버전 간 업데이트 확인은 이 자동 빌드와 별도로 수행합니다.
 
@@ -95,4 +95,4 @@ https://github.com/techjuicelab/cubirumi/releases/latest/download/appcast-x64.xm
 - 공개 피드를 사용하는 이전 버전에서 새 버전을 확인·다운로드하고, 앱 종료 후 적용되는지 확인합니다. 사용자 선택과 회사명·사장 이름·기록이 유지되어야 합니다.
 - 수정된 ZIP·잘못된 서명·조회 실패가 설치 성공으로 처리되지 않는지 확인합니다.
 
-로컬 빌드·테스트 통과, 공개 파일 다운로드, 신규 Mac 첫 실행, 실제 버전 간 자동 업데이트의 확인 결과는 각각 기록합니다. 현재 문서는 마지막 두 흐름이 완료되었다고 보증하지 않습니다.
+로컬 빌드·테스트 통과, 공개 파일 다운로드, 신규 Mac 첫 실행, 실제 버전 간 자동 업데이트의 확인 결과는 각각 기록합니다. v0.3.1의 Apple Silicon Mac 버전 간 업데이트 결과는 [릴리스 검증 기록](releases/v0.3.1.md#출시-검증)에 정리했습니다. 이 결과가 신규 Mac 첫 실행이나 실제 Intel Mac 검증을 대신하지는 않습니다.
