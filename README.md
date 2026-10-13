@@ -29,12 +29,14 @@ The app interface and detailed documentation are currently in Korean.
 | ![A three-floor building showing three connected projects](design/previews/office-building.png) | ![An office overview showing agents and their observed activity](design/previews/office-overview.png) |
 | Follow activity across multiple projects. | Select a floor to look closer at its agents. |
 
-<sub>These screenshots show actual use of the development app, named Agent Office. The public app is named Cubirumi. The “hide idle floors” control shown in the screenshots is a development feature and is not included in v0.3.0.</sub>
+<sub>These screenshots show actual use of the development app, named Agent Office. The public app is named Cubirumi. Floor management is included in the public app starting with v0.3.1.</sub>
 
 <details>
-<summary>Development preview: floor management</summary>
+<summary>Floor management in v0.3.1</summary>
 
-This preview is **not included in the public v0.3.0 release**. By default, the development version hides project floors with no new activity for an hour and shows up to eight recently active floors. Floors with work, pending approvals, or errors stay visible regardless of that limit. Settings offer an idle period from 30 minutes to seven days, or off, and a floor limit of 4, 6, 8, 10, or 12 floors, or unlimited. Hidden-floor counts appear below the floor list. Hiding a floor preserves its records and does not end its agents' sessions; new activity makes it eligible to appear again.
+By default, v0.3.1 hides project floors with no new activity for an hour and shows up to eight recently active floors. Floors currently showing work, pending approvals, or errors stay visible regardless of that limit. Settings offer an idle period from 30 minutes to seven days, or off, and a floor limit of 4, 6, 8, 10, or 12 floors, or unlimited. Hidden-floor counts appear below the floor list. New activity brings a hidden floor back into view. Hiding a floor does not delete its records, end its agents' sessions, or mark them as having left.
+
+[v0.3.1 release notes (Korean)](docs/releases/v0.3.1.md)
 
 </details>
 
@@ -123,7 +125,7 @@ Connected projects appear as floors. Select a floor to see its chats together, o
 
 Automatic observation starts only when you turn it on. It tours active floors and work areas, following agents at work. Selecting a floor or worker, or manually moving the camera, stops the tour and preserves your chosen view. Switching to another app and back does not turn the tour on. Settings control tour timing, camera tracking, task bubbles, reduced motion, and power saving.
 
-Working agents have bright red markers. Waiting agents and unused desks are hidden from the scene, while their records remain in the full employee list. Projects remain as floors in v0.3.0. A completed response puts an agent into a waiting state; only an explicit end event marks the session as ended.
+Working agents have bright red markers. Waiting agents and unused desks are hidden from the scene, while their records remain in the full employee list. Idle project floors follow the floor-management settings above. A completed response puts an agent into a waiting state; only an explicit end event marks the session as ended.
 
 The energy cards show **shared account limits**, not an agent's stamina or performance. Click a card for details. Missing values stay unknown; older values are labeled with their observation time, and passing a reset time does not automatically refill them. See [usage sources and limitations](docs/USAGE.md).
 

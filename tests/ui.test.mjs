@@ -69,9 +69,9 @@ for (const focusTarget of ['#usage-card-claude', '#claude-usage-external-link'])
     if (!cardFocus) ui.click('.energy-tank.claude');
     const target = ui.document.querySelector(cardFocus ? '.energy-tank.claude' : '.usage-external-link');
     target.focus();
-    assert.equal(ui.document.activeElement, target);
+    assert.equal(ui.document.activeElement === target, true);
     ui.window.dispatchEvent(new ui.window.Event('focus')); await ui.flush();
-    assert.notEqual(ui.document.activeElement, target, 'failure changes the DOM and exercises focus restoration');
+    assert.equal(ui.document.activeElement !== target, true, 'failure changes the DOM and exercises focus restoration');
     assert.equal(ui.document.activeElement.id, focusTarget.slice(1));
   });
 }
@@ -620,11 +620,11 @@ test('incoming work preserves a zoomed camera and keyboard focus in a changing r
   ui.click('[data-open="team"]');
   const oldButton = ui.get('roster').querySelector('[data-agent="worker-live"]');
   oldButton.focus();
-  assert.equal(ui.document.activeElement, oldButton);
+  assert.equal(ui.document.activeElement === oldButton, true);
   await ui.emit(snapshot({ id: 'next-approval', timestamp: '2026-01-01T10:02:00.000Z', title: '확인 대기', status: 'approval' }));
   const currentButton = ui.get('roster').querySelector('[data-agent="worker-live"]');
-  assert.notEqual(currentButton, oldButton, 'the changed status actually exercises DOM replacement');
-  assert.equal(ui.document.activeElement, currentButton, 'the same employee retains keyboard focus');
+  assert.equal(currentButton !== oldButton, true, 'the changed status actually exercises DOM replacement');
+  assert.equal(ui.document.activeElement === currentButton, true, 'the same employee retains keyboard focus');
   currentButton.click();
   assert.equal(ui.get('office-panel').open, false);
   assert.equal(ui.get('employee-card').hidden, false);
@@ -1092,7 +1092,7 @@ test('usage refreshes on focus without changing manual observation, and bubbles 
   }
   assert.equal(ui.scene.bubbles, false);
   assert.equal(ui.scene.labels, true);
-  assert.equal(ui.get('setting-awayCctv'), null);
+  assert.equal(ui.get('setting-awayCctv') === null, true);
   ui.click('#close-panel'); ui.click('[data-floor="project-live"]');
   ui.window.dispatchEvent(new ui.window.Event('blur')); await ui.flush();
   assert.equal(ui.get('game').dataset.cameraScope, 'floor');
@@ -1127,7 +1127,7 @@ test('a large connected room reaches the scene together and camera follows obser
   const ui = await mountOffice(t, { states: [{ agents: workers, events: [] }] });
   assert.equal(ui.scene.agents.length, 3, 'only the two active employees and the boss occupy the room');
   assert.equal(ui.get('staff-count').textContent, '30', 'all records remain available');
-  assert.equal(ui.get('room-pager'), null, 'there is no five-employee page switch');
+  assert.equal(ui.get('room-pager') === null, true, 'there is no five-employee page switch');
   assert.equal(ui.scene.buildingView,true,'even one connected project begins with a building overview');
   ui.click('[data-floor="project-live"]');
   ui.key('c');
@@ -1163,7 +1163,7 @@ test('shared energy stays visible in CCTV, separates Spark, and keeps the last v
   assert.match(ui.get('energy-tanks').querySelector('.codex').textContent, /97%/);
   assert.match(ui.get('energy-tanks').querySelector('.claude').textContent, /—.*상태줄 연결 대기/);
   ui.key('c');
-  assert.equal(ui.get('energy-hud').closest('.hud'), null, 'energy is outside HUD that CCTV hides');
+  assert.equal(ui.get('energy-hud').closest('.hud') === null, true, 'energy is outside HUD that CCTV hides');
   ui.click('.energy-tank.codex');
   assert.equal(ui.get('office-panel').open, true);
   assert.match(ui.get('usage-detail').textContent, /Codex 주간.*97%.*사용 3%/);
@@ -1215,7 +1215,7 @@ test('local company and owner settings survive incoming work, saving, and a stat
   assert.equal(ui.scene.agents.find(agent => agent.id === 'boss').name, draftName);
   assert.equal(ui.document.querySelector('[data-company-name]').textContent, '새로운 사무실');
   assert.equal(ui.document.querySelector('[data-owner-name]').textContent, draftName);
-  assert.equal(ui.document.querySelector('[data-owner-name] b'), null, 'names are text, never HTML');
+  assert.equal(ui.document.querySelector('[data-owner-name] b') === null, true, 'names are text, never HTML');
   assert.match(ui.get('company-save-status').textContent, /반영했어요/);
   ui.click('#close-panel');
   ui.source.disconnect(); ui.source.open(); await ui.flush();
@@ -1476,7 +1476,7 @@ test('the communication history offers replay for handoffs and messages but not 
   assert.equal(items.length, 3);
   const order = items.find(item => /업무 지시/u.test(item.textContent));
   assert.ok(order, 'the instruction is listed');
-  assert.equal(order.querySelector('.handoff-replay'), null, 'decision 50: an instruction replay would only open the building view, so it has no button');
+  assert.equal(order.querySelector('.handoff-replay') === null, true, 'decision 50: an instruction replay would only open the building view, so it has no button');
   assert.deepEqual([...ui.get('feed').querySelectorAll('[data-replay]')].map(button => button.dataset.replay).sort(), ['past-handoff-kept', 'past-message-kept']);
   ui.document.querySelector('[data-replay="past-message-kept"]').focus();
   await ui.emit(snapshot({ id: 'live-order', type: 'user.instruction', toAgentId: 'worker-idle', timestamp: new Date(Date.now()).toISOString() }));
@@ -1513,7 +1513,7 @@ test('approval notifications live inside the active modal and return to the full
   assert.equal(toast.hidden, false);
   assert.match(toast.textContent, /확인 요청/);
   ui.click('#close-panel'); await ui.flush();
-  assert.equal(toast.parentElement, ui.get('game'));
+  assert.equal(toast.parentElement === ui.get('game'), true);
   assert.equal(ui.document.querySelectorAll('#toast').length, 1);
 });
 
@@ -1558,9 +1558,9 @@ test('old working and error snapshots are unconfirmed rather than current activi
   assert.match(detail.textContent, /도구 실행 오류/u);
   assert.equal(detail.querySelector('.status-chip').textContent, '현재 상태 미확인');
   assert.equal(detail.querySelector('.status-chip .status-shape').getAttribute('data-shape'), 'unknown');
-  assert.equal(detail.querySelector('.elapsed'), null);
-  assert.equal(detail.querySelector('.tool-line'), null);
-  assert.equal(detail.querySelector('.card-note'), null, 'an old error is not presented as a current alert');
+  assert.equal(detail.querySelector('.elapsed') === null, true);
+  assert.equal(detail.querySelector('.tool-line') === null, true);
+  assert.equal(detail.querySelector('.card-note') === null, true, 'an old error is not presented as a current alert');
   const selected = ui.scene.agents.find(agent => agent.id === 'worker-error');
   assert.equal(selected.status, 'idle', 'a selected historical employee has no active marker');
   assert.equal(selected.unconfirmedStatus, 'error', 'the original source status is preserved');
@@ -1623,11 +1623,11 @@ test('freshness expiration keeps a manually selected employee quiet without chan
   const detail = ui.get('employee-detail');
   assert.equal(detail.querySelector('.status-chip').textContent, '현재 상태 미확인');
   assert.match(detail.querySelector('.unconfirmed-banner').textContent, /마지막 상태: 작업 중/u);
-  assert.equal(detail.querySelector('.elapsed'), null);
-  assert.equal(detail.querySelector('.tool-line'), null);
+  assert.equal(detail.querySelector('.elapsed') === null, true);
+  assert.equal(detail.querySelector('.tool-line') === null, true);
   await ui.emit(snapshot({ id: 'selected-fresh-work', timestamp: new Date(Date.now()).toISOString(), title: '다시 코드 작업' }));
   assert.equal(ui.scene.agents.find(agent => agent.id === 'worker-live').status, 'working');
-  assert.equal(detail.querySelector('.unconfirmed-banner'), null);
+  assert.equal(detail.querySelector('.unconfirmed-banner') === null, true);
   assert.equal(detail.querySelector('.card-section-title').textContent, '지금 하는 일');
   assert.equal(ui.scene.zoomLevel, zoom);
   assert.equal(ui.calls.slice(callsBeforeExpiry).some(call => ['focus', 'resetCamera'].includes(call[0])), false);
@@ -2246,4 +2246,161 @@ test('communication filters expose which filter is pressed', async t => {
   ui.scene.select('worker-live');
   ui.click('#employee-detail [data-feed-agent="worker-live"]');
   assert.deepEqual(pressed(), [['handoff', 'false'], ['approval', 'false'], ['all', 'true']], "a person's history uses every record");
+});
+
+const minutesBefore = minutes => new Date(Date.parse(timestamp) - minutes * 60_000).toISOString();
+const restedFloor = (minutes, changes = {}) => snapshot({ id: 'snapshot-rested', source: 'claude', agentId: 'worker-rested', agentName: '오래 쉰 직원',
+  status: 'idle', projectId: 'project-rested', projectName: '오래 쉰 프로젝트', sessionId: 'session-rested', timestamp: minutesBefore(minutes), ...changes });
+
+test('floors quiet for longer than an hour leave the rail, the selector, the building and the head counts, and the rail says so', async t => {
+  const ui = await mountOffice(t, { states: [{ agents: [...initialSnapshots(), restedFloor(61)], events: [] }] });
+  assert.deepEqual([...ui.document.querySelectorAll('[data-floor]')].map(button => button.dataset.floor), ['project-live', 'project-idle']);
+  assert.deepEqual([...ui.get('project-select').options].map(option => option.value), ['project-live', 'project-idle']);
+  assert.deepEqual(ui.scene.buildingFloors.map(floor => floor.id), ['project-live', 'project-idle']);
+  assert.equal(ui.get('floor-count').textContent, '2');
+  assert.equal(ui.get('staff-count').textContent, '2', 'people on a resting floor are not counted as present');
+  assert.match(ui.get('location-detail').textContent, /2개 프로젝트/u);
+  const note = ui.get('dormant-floors');
+  assert.equal(note.textContent, '쉬는 층1개숨김');
+  assert.equal(note.getAttribute('aria-label'), '쉬는 층 1개를 숨겼어요 · 설정에서 기간과 층수 바꾸기');
+  ui.click('[data-open="team"]'); ui.click('[data-roster-filter="all"]');
+  assert.deepEqual([...ui.get('roster').querySelectorAll('[data-agent]')].map(button => button.dataset.agent), ['worker-live', 'worker-idle']);
+  ui.click('#close-panel');
+  ui.scene.select('worker-rested');
+  assert.equal(ui.get('employee-card').hidden, true, 'a person on a resting floor cannot be opened from a stale scene');
+});
+
+test('the resting-floor note opens its setting, which lists the hidden floors and brings them back at once when changed', async t => {
+  const ui = await mountOffice(t, { states: [{ agents: [...initialSnapshots(), restedFloor(150)], events: [] }] });
+  ui.get('dormant-floors').focus();
+  ui.click('#dormant-floors');
+  assert.equal(ui.get('office-panel').open, true);
+  assert.equal(ui.get('settings-panel').hidden, false);
+  const select = ui.get('setting-dormantFloorMinutes');
+  assert.equal(ui.document.activeElement.id, 'setting-dormantFloorMinutes', 'the note leads straight to the control that decides it');
+  assert.equal(select.value, '60');
+  assert.deepEqual([...select.options].map(option => [option.value, option.textContent]),
+    [['30', '30분'], ['60', '1시간'], ['180', '3시간'], ['360', '6시간'], ['720', '12시간'], ['1440', '하루'], ['4320', '3일'], ['10080', '7일'], ['0', '숨기지 않음']]);
+  assert.match(ui.get('dormant-floors-note').textContent, /지금 숨긴 층 1개 · 오래 쉰 프로젝트\(2시간 전\)/u);
+  assert.match(ui.get('dormant-floors-note').textContent, /새 소식이 오면 층이 다시 나타나요/u);
+  const choose = async value => { select.value = value; select.dispatchEvent(new ui.window.Event('change', { bubbles: true })); await ui.flush(); };
+  await choose('180');
+  assert.deepEqual([...ui.document.querySelectorAll('[data-floor]')].map(button => button.dataset.floor), ['project-live', 'project-idle', 'project-rested']);
+  assert.deepEqual(ui.scene.buildingFloors.map(floor => floor.id), ['project-live', 'project-idle', 'project-rested']);
+  assert.equal(ui.get('dormant-floors') === null, true);
+  assert.equal(ui.get('staff-count').textContent, '3');
+  assert.equal(ui.get('dormant-floors-note').textContent, '지금 숨긴 층이 없어요.');
+  assert.equal(JSON.parse(ui.window.localStorage.getItem('agent-office.view.v1')).dormantFloorMinutes, 180);
+  assert.match(ui.get('settings-saved').textContent, /저장했어요/u);
+  await choose('0');
+  assert.equal(ui.document.querySelectorAll('[data-floor]').length, 3);
+  assert.equal(ui.get('dormant-floors-note').textContent, '지금 숨긴 층이 없어요.', 'the floor limit still applies, so the note does not promise every floor');
+  await choose('30');
+  assert.deepEqual([...ui.document.querySelectorAll('[data-floor]')].map(button => button.dataset.floor), ['project-live', 'project-idle']);
+  ui.click('#close-panel'); await ui.flush();
+  // Ids, not nodes: a failed comparison of DOM nodes makes assert print the whole window.
+  assert.equal(ui.document.activeElement.id, 'dormant-floors', 'the note was re-rendered while the panel was open, and focus still returns to it');
+});
+
+test('a saved choice to keep every floor is honored from the first render', async t => {
+  const ui = await mountOffice(t, { savedSettings: { dormantFloorMinutes: 0 }, states: [{ agents: [...initialSnapshots(), restedFloor(60 * 24 * 400)], events: [] }] });
+  assert.equal(ui.document.querySelectorAll('[data-floor]').length, 3);
+  assert.equal(ui.get('dormant-floors') === null, true);
+  assert.equal(ui.get('setting-dormantFloorMinutes').value, '0');
+});
+
+test('a floor rests when the clock alone passes its limit, releasing a manual selection, and its next report brings it back', async t => {
+  const ui = await mountOffice(t, { states: [{ agents: [...initialSnapshots(), restedFloor(60, { timestamp: new Date(Date.parse(timestamp) - 60 * 60_000 + 2500).toISOString() })], events: [] }] });
+  assert.equal(ui.document.querySelectorAll('[data-floor]').length, 3, 'the floor is shown until the limit passes');
+  ui.click('[data-floor="project-rested"]');
+  assert.equal(ui.get('room-title').textContent, '오래 쉰 프로젝트');
+  await ui.advance(2000);
+  assert.equal(ui.get('room-title').textContent, '오래 쉰 프로젝트');
+  await ui.advance(1000);
+  assert.deepEqual([...ui.document.querySelectorAll('[data-floor]')].map(button => button.dataset.floor), ['project-live', 'project-idle']);
+  assert.deepEqual(ui.scene.buildingFloors.map(floor => floor.id), ['project-live', 'project-idle'], 'the building follows without another server event');
+  assert.equal(ui.get('room-title').textContent, '실제 프로젝트', 'the selection moves to a floor that is still shown');
+  assert.equal(ui.get('dormant-floors').textContent, '쉬는 층1개숨김');
+  assert.equal(ui.get('watch-toggle').getAttribute('aria-pressed'), 'false', 'a resting floor never starts observation');
+  await ui.emit(restedFloor(0, { id: 'rested-returns', status: 'working', title: '다시 시작한 작업', timestamp: new Date(Date.now()).toISOString() }));
+  assert.deepEqual([...ui.document.querySelectorAll('[data-floor]')].map(button => button.dataset.floor), ['project-live', 'project-idle', 'project-rested']);
+  assert.match(ui.document.querySelector('[data-floor="project-rested"]').textContent, /1명 작업 중/u);
+  assert.equal(ui.get('dormant-floors') === null, true);
+  assert.equal(ui.get('room-title').textContent, '실제 프로젝트', 'a returning floor does not take over a manual view');
+});
+
+test('an old approval request keeps its floor and stays reachable from the owner inbox', async t => {
+  const ui = await mountOffice(t, { states: [{ agents: [...initialSnapshots(), restedFloor(60 * 24 * 30, { status: 'approval' })], events: [] }] });
+  assert.match(ui.document.querySelector('[data-floor="project-rested"]').textContent, /1명 확인 필요/u);
+  assert.equal(ui.get('dormant-floors') === null, true);
+  assert.equal(ui.scene.approvalCount, 1);
+  ui.scene.select('boss');
+  ui.click('#employee-detail .inbox-row[data-agent="worker-rested"]');
+  assert.equal(ui.get('room-title').textContent, '오래 쉰 프로젝트');
+});
+
+test('work reported long ago and never ended does not hold its floor', async t => {
+  const ui = await mountOffice(t, { states: [{ agents: [...initialSnapshots(), restedFloor(60 * 24 * 5, { status: 'working' })], events: [] }] });
+  assert.deepEqual([...ui.document.querySelectorAll('[data-floor]')].map(button => button.dataset.floor), ['project-live', 'project-idle']);
+  assert.equal(ui.get('dormant-floors').textContent, '쉬는 층1개숨김');
+});
+
+test('when every floor is resting the office waits for staff and still says floors were left out', async t => {
+  const ui = await mountOffice(t, { states: [{ agents: [restedFloor(120)], events: [] }] });
+  assert.equal(ui.get('empty-office').hidden, false);
+  assert.equal(ui.get('floor-count').textContent, '0');
+  assert.equal(ui.get('floor-list').querySelector('.rail-empty').textContent, '—');
+  assert.equal(ui.get('dormant-floors').textContent, '쉬는 층1개숨김');
+  assert.deepEqual(ui.scene.agents.map(agent => agent.id), ['boss']);
+  assert.deepEqual(ui.scene.buildingFloors, []);
+});
+
+const recentFloors = count => Array.from({ length: count }, (_, index) => snapshot({ id: `snapshot-floor-${index + 1}`, source: 'claude',
+  agentId: `worker-floor-${index + 1}`, agentName: `${index + 1}번 직원`, status: 'idle', projectId: `project-${index + 1}`,
+  projectName: `${index + 1}번 프로젝트`, sessionId: `session-${index + 1}`, timestamp: minutesBefore(count - index) }));
+const shownFloors = ui => [...ui.document.querySelectorAll('[data-floor]')].map(button => button.dataset.floor);
+
+test('the building keeps the eight floors reported from most recently, and the setting raises, lowers or removes the limit', async t => {
+  const ui = await mountOffice(t, { states: [{ agents: recentFloors(10), events: [] }] });
+  const lastEight = Array.from({ length: 8 }, (_, index) => `project-${index + 3}`);
+  assert.deepEqual(shownFloors(ui), lastEight, 'the two floors quiet the longest rest');
+  assert.deepEqual(ui.scene.buildingFloors.map(floor => floor.id), lastEight);
+  assert.equal(ui.get('floor-count').textContent, '8');
+  assert.equal(ui.get('staff-count').textContent, '8');
+  assert.equal(ui.get('dormant-floors').textContent, '쉬는 층2개숨김');
+  assert.equal(ui.get('dormant-floors').getAttribute('aria-label'), '쉬는 층 2개를 숨겼어요 · 설정에서 기간과 층수 바꾸기');
+  ui.click('#dormant-floors');
+  const select = ui.get('setting-maxFloors');
+  assert.equal(select.value, '8');
+  assert.deepEqual([...select.options].map(option => [option.value, option.textContent]),
+    [['4', '4층'], ['6', '6층'], ['8', '8층'], ['10', '10층'], ['12', '12층'], ['0', '제한 없음']]);
+  assert.match(ui.get('dormant-floors-note').textContent, /지금 숨긴 층 2개 · 2번 프로젝트\(9분 전\) · 1번 프로젝트\(10분 전\)/u);
+  const choose = async value => { select.value = value; select.dispatchEvent(new ui.window.Event('change', { bubbles: true })); await ui.flush(); };
+  await choose('4');
+  assert.deepEqual(shownFloors(ui), ['project-7', 'project-8', 'project-9', 'project-10']);
+  assert.equal(JSON.parse(ui.window.localStorage.getItem('agent-office.view.v1')).maxFloors, 4);
+  await choose('10');
+  assert.equal(shownFloors(ui).length, 10);
+  assert.equal(ui.get('dormant-floors') === null, true);
+  await choose('0');
+  assert.equal(shownFloors(ui).length, 10);
+  assert.equal(ui.get('dormant-floors-note').textContent, '지금 숨긴 층이 없어요.');
+  const minutes = ui.get('setting-dormantFloorMinutes');
+  minutes.value = '0'; minutes.dispatchEvent(new ui.window.Event('change', { bubbles: true })); await ui.flush();
+  assert.equal(ui.get('dormant-floors-note').textContent, '모든 층을 건물에 계속 보여줘요.');
+});
+
+test('a report from a resting floor brings it back in place of the floor quiet the longest, and busy floors never give way', async t => {
+  const ui = await mountOffice(t, { states: [{ agents: recentFloors(9), events: [] }] });
+  assert.equal(shownFloors(ui).includes('project-1'), false);
+  await ui.emit(snapshot({ id: 'floor-1-returns', source: 'claude', agentId: 'worker-floor-1', agentName: '1번 직원', status: 'working', title: '다시 시작한 작업',
+    projectId: 'project-1', projectName: '1번 프로젝트', sessionId: 'session-1', timestamp: new Date(Date.now()).toISOString() }));
+  assert.deepEqual(shownFloors(ui), ['project-1', 'project-3', 'project-4', 'project-5', 'project-6', 'project-7', 'project-8', 'project-9']);
+  assert.match(ui.document.querySelector('[data-floor="project-1"]').textContent, /1명 작업 중/u);
+  for (let index = 2; index <= 9; index++) {
+    await ui.emit(snapshot({ id: `floor-${index}-busy`, source: 'claude', agentId: `worker-floor-${index}`, agentName: `${index}번 직원`, status: 'working', title: '동시에 시작한 작업',
+      projectId: `project-${index}`, projectName: `${index}번 프로젝트`, sessionId: `session-${index}`, timestamp: new Date(Date.now()).toISOString() }));
+  }
+  assert.equal(shownFloors(ui).length, 9, 'nine floors with work are all shown past the limit of eight');
+  assert.equal(ui.get('dormant-floors') === null, true);
 });

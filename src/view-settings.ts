@@ -6,12 +6,18 @@ export interface ViewSettings {
   cycle: boolean;
   cycleSeconds: number;
   powerSaving: boolean;
+  /** Minutes a project floor may stay quiet before the building leaves it out; 0 keeps every floor. */
+  dormantFloorMinutes: number;
+  /** Most project floors the building shows, keeping the ones reported from most recently; 0 shows every floor. */
+  maxFloors: number;
   reducedMotion: boolean;
   reducedMotionOverride: boolean | null;
 }
 export const VIEW_SETTINGS_KEY = 'agent-office.view.v1';
+export const DORMANT_FLOOR_MINUTES = [0, 30, 60, 180, 360, 720, 1440, 4320, 10080];
+export const MAX_FLOOR_CHOICES = [0, 4, 6, 8, 10, 12];
 export function defaultViewSettings(reducedMotion = false): ViewSettings {
-  return { labels: true, bubbles: true, autoRotate: true, followWork: true, cycle: true, cycleSeconds: 25, powerSaving: true, reducedMotion, reducedMotionOverride: null };
+  return { labels: true, bubbles: true, autoRotate: true, followWork: true, cycle: true, cycleSeconds: 25, powerSaving: true, dormantFloorMinutes: 60, maxFloors: 8, reducedMotion, reducedMotionOverride: null };
 }
 export function normalizeViewSettings(value: unknown, reducedMotion = false): ViewSettings {
   const result = defaultViewSettings(reducedMotion);
@@ -27,6 +33,8 @@ export function normalizeViewSettings(value: unknown, reducedMotion = false): Vi
   }
   result.reducedMotion = result.reducedMotionOverride ?? reducedMotion;
   if ('cycleSeconds' in value && [15, 25, 45, 60].includes(Number(value.cycleSeconds))) result.cycleSeconds = Number(value.cycleSeconds);
+  if ('maxFloors' in value && typeof value.maxFloors === 'number' && MAX_FLOOR_CHOICES.includes(value.maxFloors)) result.maxFloors = value.maxFloors;
+  if ('dormantFloorMinutes' in value && typeof value.dormantFloorMinutes === 'number' && DORMANT_FLOOR_MINUTES.includes(value.dormantFloorMinutes)) result.dormantFloorMinutes = value.dormantFloorMinutes;
   return result;
 }
 export function readViewSettings(storage: Pick<Storage, 'getItem'>, reducedMotion = false): ViewSettings {

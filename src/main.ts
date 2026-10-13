@@ -7,7 +7,7 @@ import { isWorkingStatus } from './work-activity';
 import { portraitSVG, statusShapeSVG } from './portrait';
 import { owner, projectKey, sessionKey, updateAgentState, isWorkingAgent } from './office-state';
 import { connectedAgents, cctvRooms, modelActivity, hasVisibleActivity } from './observation';
-import { presentAgentActivity } from './activity-freshness';
+import { presentAgentActivity, splitDormantFloors } from './activity-freshness';
 import { defaultViewSettings, readViewSettings, saveViewSettings } from './view-settings';
 import { shell, icon } from './shell';
 import { CameraDirector } from './camera-director';
@@ -85,6 +85,8 @@ let bridgeObserved = false;
 let disconnectedAt = '';
 // Focus returns here when the card closes (the element, a selector if it was re-rendered, and the panel it lived in).
 let cardOpener: { element: HTMLElement; selector: string | null; panel: string } | null = null;
+// Selector of the control that opened the panel, for when the dialog cannot return focus to a re-rendered opener.
+let panelOpener: string | null = null;
 let stateLoaded = false;
 let stateAvailable = false;
 let paused = false;
@@ -253,8 +255,16 @@ function toast(message: string) {
   toastTimer = setTimeout(() => { el('toast').hidden = true; }, 4500);
 }
 // Project observed records for the live view; time alone never writes a completion or changes the source state.
-function staff(now = Date.now()) { return connectedAgents(agents).map(agent => presentAgentActivity(agent, now)); }
-function freshnessKey() { return JSON.stringify(staff().filter(agent => agent.unconfirmedStatus).map(agent => [agent.source, agent.id, agent.unconfirmedStatus])); }
+// Floors quiet for longer than the viewer's setting, and the least recently used floors beyond the viewer's floor limit, are
+// left out of this view only; their people stay connected in `agents`.
+function office(now = Date.now()) {
+  return splitDormantFloors(connectedAgents(agents).map(agent => presentAgentActivity(agent, now)), now, settings.dormantFloorMinutes * 60_000, settings.maxFloors);
+}
+function staff(now = Date.now()) { return office(now).staff; }
+function freshnessKey() {
+  const current = office();
+  return JSON.stringify([current.staff.filter(agent => agent.unconfirmedStatus).map(agent => [agent.source, agent.id, agent.unconfirmedStatus]), current.dormant.map(floor => floor.id)]);
+}
 /** Exact connected head counts for a floor; quiet is connected but idle, waiting or finished responding. */
 function floorCounts(list: Agent[]) {
   const counts = { working: 0, approval: 0, error: 0, quiet: 0, unconfirmed: 0 };
@@ -438,7 +448,7 @@ function renderNavigation() {
   for (const button of document.querySelectorAll<HTMLButtonElement>('[data-building-cctv]')) {
     button.setAttribute('aria-pressed', String(buildingWide && !watch));
   }
-  syncHTML(el('floor-list'), currentFloors.map((item, i) => {
+  syncHTML(el('floor-list'), (currentFloors.map((item, i) => {
     const attention = attentionCount(item.agents), working = item.agents.filter(isWorkingAgent).length;
     const summary = [...(working ? [`${working}명 작업 중`] : []), ...(attention ? [`${attention}명 확인 필요`] : [])].join(' · ') || '활동 없음';
     // Same order as the owner inbox (approval before error), with the shared table's colour and shape.
@@ -446,7 +456,7 @@ function renderNavigation() {
       : item.agents.some(agent => agent.status === 'error') ? 'error' : working ? 'working' : '';
     const lamp = lampStatus ? ` data-status="${lampStatus}" data-shape="${statusStyleFor(lampStatus).shape}"` : '';
     return `<button class="floor-button ${item.id === selectedProject ? 'selected' : ''}" data-floor="${escape(item.id)}" aria-label="${i + 1}층 ${escape(item.name)} · ${summary}" aria-pressed="${item.id === selectedProject}" title="${escape(item.name)} · ${summary}"><span class="floor-digit">${i + 1}<small>F</small></span><span class="floor-info"><strong>${escape(item.name)}</strong><small>${summary}</small></span><i class="floor-lamp"${lamp}></i></button>`;
-  }).join('') || '<span class="rail-empty">—</span>');
+  }).join('') || '<span class="rail-empty">—</span>') + dormantFloorsNote());
   syncHTML(el('project-select'), currentFloors.map((item, i) => `<option value="${escape(item.id)}">${i + 1}F · ${escape(item.name)}</option>`).join(''));
   el<HTMLSelectElement>('project-select').value = selectedProject;
   el<HTMLSelectElement>('project-select').disabled = !currentFloors.length;
@@ -479,6 +489,20 @@ function renderNavigation() {
   const key = currentCameraKey();
   if (lastCameraKey !== key) { if (!buildingWide) scene?.resetCamera(); setZoomLock(false); lastCameraKey = key; director.roomChanged(); }
   measureSceneInsets();
+}
+/** Tells the viewer that quiet floors were left out, and leads to the setting that decides it. */
+function dormantFloorsNote() {
+  const count = office().dormant.length;
+  if (!count) return '';
+  const label = `쉬는 층 ${count}개를 숨겼어요 · 설정에서 기간과 층수 바꾸기`;
+  return `<button id="dormant-floors" class="dormant-floors" data-open="settings" data-focus-setting="setting-dormantFloorMinutes" aria-label="${label}" title="${label}">${icon('clock')}<span>쉬는 층</span><b>${count}개</b><span>숨김</span></button>`;
+}
+function renderDormantFloors() {
+  const hidden = office().dormant;
+  const names = hidden.slice(0, 6).map(floor => `${escape(floor.name)}(${relativeTime(floor.lastEventAt ?? '')})`).join(' · ');
+  el('dormant-floors-note').innerHTML = !settings.dormantFloorMinutes && !settings.maxFloors ? '모든 층을 건물에 계속 보여줘요.'
+    : hidden.length ? `지금 숨긴 층 ${hidden.length}개 · ${names}${hidden.length > 6 ? ` 외 ${hidden.length - 6}개` : ''}<br>직원 기록은 그대로이고, 그 프로젝트에서 새 소식이 오면 층이 다시 나타나요.`
+      : '지금 숨긴 층이 없어요.';
 }
 type PortraitSize = 'card' | 'owner' | 'roster' | 'inbox' | 'chip';
 function portrait(agent: Pick<Agent, 'id' | 'color'>, size: PortraitSize) {
@@ -727,7 +751,7 @@ function renderPanel() {
   if (panel === 'team') renderRoster();
   if (panel === 'models') renderModels();
   if (panel === 'communications') renderFeed();
-  if (panel === 'settings') renderConnection();
+  if (panel === 'settings') { renderConnection(); renderDormantFloors(); }
   if (panel === 'usage') renderUsage();
 }
 function renderAll() {
@@ -757,7 +781,7 @@ function openPanel(next: string, usageProvider?: string) {
   el('panel-title').textContent = titles[next]![0]; el('panel-eyebrow').textContent = titles[next]![1];
   renderPanel();
   const dialog = el<HTMLDialogElement>('office-panel');
-  if (!dialog.open) dialog.showModal();
+  if (!dialog.open) { panelOpener = focusSelector(document.activeElement instanceof HTMLElement ? document.activeElement : null); dialog.showModal(); }
   placeToast();
   if (next === 'usage' && (usageProvider === 'claude' || usageProvider === 'codex')) {
     const section = el(usageSectionId(usageProvider));
@@ -766,6 +790,17 @@ function openPanel(next: string, usageProvider?: string) {
   }
 }
 function closePanel() { el<HTMLDialogElement>('office-panel').close(); panel = ''; placeToast(); resetCycle(); }
+/**
+ * A dialog returns focus to its opener by itself. An opener re-rendered while the panel was open (the resting-floor note after
+ * its setting changed) is no longer that element, so it is found again by its selector.
+ */
+function restorePanelOpener() {
+  const selector = panelOpener; panelOpener = null;
+  const dialog = el<HTMLDialogElement>('office-panel');
+  const active = document.activeElement;
+  if (!selector || dialog.open || (active instanceof HTMLElement && active !== document.body && !dialog.contains(active))) return;
+  document.querySelector<HTMLElement>(selector)?.focus({ preventScroll: true });
+}
 function syncObservationCamera() {
   const moving = watch && settings.autoRotate;
   const enabled = moving && patrolRooms().length > 0;
@@ -790,6 +825,8 @@ function applySettings(persist = false) {
   el('motion-preference-note').textContent = settings.reducedMotionOverride === null ? '기기의 움직임 설정을 따르고 있어요.' : '이 앱에서 직접 정한 설정을 사용해요.';
   el<HTMLButtonElement>('setting-systemMotion').disabled = settings.reducedMotionOverride === null;
   el<HTMLSelectElement>('setting-cycleSeconds').value = String(settings.cycleSeconds);
+  el<HTMLSelectElement>('setting-dormantFloorMinutes').value = String(settings.dormantFloorMinutes);
+  el<HTMLSelectElement>('setting-maxFloors').value = String(settings.maxFloors);
   resetCycle();
   if (persist) {
     let saved = false;
@@ -985,6 +1022,7 @@ document.addEventListener('click', event => {
   if (target.dataset.open) {
     if (target.dataset.open === 'communications') setFeedAgent(target.dataset.feedAgent ?? '');
     openPanel(target.dataset.open, target.dataset.usageProvider);
+    if (target.dataset.focusSetting) document.getElementById(target.dataset.focusSetting)?.focus();
   }
   else if (target.dataset.agent) selectAgent(target.dataset.agent);
   else if (target.dataset.floor) pickRoom(target.dataset.floor);
@@ -1007,7 +1045,7 @@ document.addEventListener('click', event => {
   }
 });
 el('close-panel').addEventListener('click', closePanel);
-el('office-panel').addEventListener('close', () => { panel = ''; placeToast(); resetCycle(); });
+el('office-panel').addEventListener('close', () => { panel = ''; placeToast(); resetCycle(); restorePanelOpener(); });
 el('office-panel').addEventListener('click', event => {
   if (event.target !== el('office-panel')) return;
   const rect = el('office-panel').getBoundingClientRect();
@@ -1093,6 +1131,10 @@ const onMotionPreferenceChange = () => {
 };
 motionPreference.addEventListener('change', onMotionPreferenceChange);
 el('setting-cycleSeconds').addEventListener('change', () => { settings.cycleSeconds = Number(el<HTMLSelectElement>('setting-cycleSeconds').value); applySettings(true); });
+// The floors shown follow the choice at once: the rail, the building and the head counts all read the same presented staff.
+for (const key of ['dormantFloorMinutes', 'maxFloors'] as const) el(`setting-${key}`).addEventListener('change', () => {
+  settings[key] = Number(el<HTMLSelectElement>(`setting-${key}`).value); applySettings(true); renderAll();
+});
 el('watch-toggle').addEventListener('click', () => setWatch(!watch));
 el('exit-watch').addEventListener('click', () => setWatch(false));
 // A press on the office may be a click on the owner, whose reaction or five-click spin must not be cut by the first crane.

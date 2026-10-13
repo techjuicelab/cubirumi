@@ -60,3 +60,43 @@ test('explicit and legacy motion choices survive OS changes until system default
   assert.equal(saveViewSettings(storage, settings), true);
   assert.equal(readViewSettings(storage, false).reducedMotion, true);
 });
+
+test('quiet floors rest after an hour by default, and only the offered limits are kept', () => {
+  assert.equal(normalizeViewSettings(null).dormantFloorMinutes, 60);
+  for (const minutes of [0, 30, 60, 180, 360, 720, 1440, 4320, 10080]) assert.equal(normalizeViewSettings({ dormantFloorMinutes: minutes }).dormantFloorMinutes, minutes);
+  // Number(null), Number('') and Number(false) are 0, which would silently keep every floor.
+  for (const invalid of [null, '', false, '30', 1, -60, 60.5, NaN, Infinity, [60], {}]) {
+    assert.equal(normalizeViewSettings({ dormantFloorMinutes: invalid }).dormantFloorMinutes, 60, String(invalid));
+  }
+  let stored;
+  const storage = { getItem() { return stored ?? null; }, setItem(_key, value) { stored = value; } };
+  const settings = readViewSettings(storage);
+  settings.dormantFloorMinutes = 0;
+  assert.equal(saveViewSettings(storage, settings), true);
+  assert.equal(readViewSettings(storage).dormantFloorMinutes, 0, 'choosing to keep every floor survives a reload');
+  assert.equal(readViewSettings({ getItem() { return JSON.stringify({ labels: false }); } }).dormantFloorMinutes, 60, 'older saved settings gain the default');
+});
+
+test('the first, hour-based limit of a day is not carried over, so its saved default cannot keep a crowded building', () => {
+  let stored = JSON.stringify({ labels: false, dormantFloorHours: 24 });
+  const storage = { getItem() { return stored; }, setItem(_key, value) { stored = value; } };
+  const settings = readViewSettings(storage);
+  assert.equal(settings.dormantFloorMinutes, 60);
+  assert.equal(Object.hasOwn(settings, 'dormantFloorHours'), false);
+  assert.equal(saveViewSettings(storage, settings), true);
+  assert.equal(Object.hasOwn(JSON.parse(stored), 'dormantFloorHours'), false);
+});
+
+test('the building shows at most eight floors by default, and only the offered floor limits are kept', () => {
+  assert.equal(normalizeViewSettings(null).maxFloors, 8);
+  for (const floors of [0, 4, 6, 8, 10, 12]) assert.equal(normalizeViewSettings({ maxFloors: floors }).maxFloors, floors);
+  for (const invalid of [null, '', false, '6', 1, 7, -8, 8.5, NaN, Infinity, [8], {}]) {
+    assert.equal(normalizeViewSettings({ maxFloors: invalid }).maxFloors, 8, String(invalid));
+  }
+  let stored;
+  const storage = { getItem() { return stored ?? null; }, setItem(_key, value) { stored = value; } };
+  const settings = readViewSettings(storage);
+  settings.maxFloors = 0;
+  assert.equal(saveViewSettings(storage, settings), true);
+  assert.equal(readViewSettings(storage).maxFloors, 0, 'choosing no floor limit survives a reload');
+});
