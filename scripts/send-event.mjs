@@ -4,7 +4,7 @@ import { postEvent, readJsonInput } from '../integrations/claude-plugin/scripts/
 // JSON 객체 하나를 stdin으로 받는 명시적 전송 명령입니다.
 try {
   const input = await readJsonInput();
-  const fields = ['source', 'type', 'agentId', 'agentName', 'role', 'status', 'title', 'toAgentId', 'toAgentName', 'taskId', 'id', 'timestamp', 'projectId', 'projectName', 'sessionId', 'sessionName', 'parentAgentId', 'model', 'modelEvidence', 'observation', 'toolName'];
+  const fields = ['source', 'type', 'agentId', 'agentName', 'role', 'status', 'title', 'toAgentId', 'toAgentName', 'taskId', 'id', 'timestamp', 'projectId', 'projectName', 'sessionId', 'sessionName', 'parentAgentId', 'model', 'modelEvidence', 'observation', 'toolName', 'toolPhase'];
   if (!input || typeof input !== 'object' || Array.isArray(input)) throw new Error('JSON 객체를 입력해 주세요.');
   const event = Object.fromEntries(fields.filter(key => input[key] !== undefined).map(key => [key, input[key]]));
   if (!['codex', 'claude', 'manual'].includes(event.source) || !['agent.started', 'agent.status', 'agent.completed', 'handoff', 'approval.requested', 'approval.resolved', 'task.created', 'user.instruction', 'agent.retired', 'session.ended'].includes(event.type)) throw new Error('source 또는 type이 올바르지 않습니다.');

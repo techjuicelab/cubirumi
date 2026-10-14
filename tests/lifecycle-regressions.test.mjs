@@ -8,6 +8,86 @@ import { CodexLogObserver, agentId } from '../scripts/codex-observer.mjs';
 import { createEventStore } from '../server/store.mjs';
 import { normalizeEvent } from '../server/bridge.mjs';
 import { updateAgentState } from '../src/office-state.ts';
+import { normalizeLifecycle } from '../integrations/claude-plugin/scripts/adapter-core.mjs';
+
+test('tool phases are normalized metadata and external tool lifetime agrees in live, persisted and restored state', async t => {
+  const dataDir = await mkdtemp(join(tmpdir(), 'office-tool-lifetime-'));
+  t.after(() => rm(dataDir, { recursive: true, force: true }));
+  const store = createEventStore({ dataDir, normalize: normalizeEvent }), live = [];
+  for (const [index, hook] of ['PreToolUse', 'PostToolUse', 'Stop', 'UserPromptSubmit'].entries()) {
+    const incoming = normalizeEvent({ ...normalizeLifecycle({ session_id: 'tool-contract', hook_event_name: hook,
+      ...(['PreToolUse', 'PostToolUse'].includes(hook) ? { tool_name: 'mcp__private__tool' } : {}) }),
+      timestamp: `2026-10-14T03:00:0${index}.000Z` });
+    if (hook === 'PreToolUse') assert.equal(incoming.toolPhase, 'started');
+    if (hook === 'PostToolUse') assert.equal(incoming.toolPhase, 'completed');
+    store.append(incoming); updateAgentState(live, incoming);
+    assert.equal(store.state().agents[0].toolName, hook === 'PreToolUse' ? 'MCP 도구' : undefined, hook);
+    assert.equal(live[0].toolName, store.state().agents[0].toolName, hook);
+  }
+  const restored = createEventStore({ dataDir, normalize: normalizeEvent }), hydrated = [];
+  for (const record of restored.state().agents) updateAgentState(hydrated, record);
+  assert.equal(hydrated[0].toolName, undefined);
+  assert.equal(hydrated[0].status, 'thinking');
+  assert.throws(() => normalizeEvent(event({ toolPhase: 'private-custom-phase' })), /toolPhase/);
+});
+
+test('session replacements and lower-authority names agree in live, persisted and restored snapshots', async t => {
+  for (const observation of ['hook', 'codex-log', 'app-server', undefined]) {
+    const dataDir = await mkdtemp(join(tmpdir(), 'office-session-name-'));
+    t.after(() => rm(dataDir, { recursive: true, force: true }));
+    const store = createEventStore({ dataDir, normalize: normalizeEvent }), live = [];
+    const apply = fields => { const incoming = event({ timestamp: '2026-10-14T04:00:00.000Z', observation, ...fields }); store.append(incoming); updateAgentState(live, incoming); };
+    apply({ id: 'named-session', sessionId: 'old-session', sessionName: 'Previous chat' });
+    apply({ id: 'replacement-session', sessionId: 'new-session' });
+    assert.equal(store.state().agents[0].sessionName, undefined, observation);
+    assert.equal(live[0].sessionName, undefined, observation);
+    apply({ id: 'authoritative-name', observation: 'app-server', sessionName: 'Confirmed chat' });
+    apply({ id: 'lower-name-only', observation: 'hook', sessionName: 'Incorrect chat' });
+    assert.equal(store.state().agents[0].sessionName, live[0].sessionName, 'name-only events obey existing grouping authority');
+    apply({ id: 'lower-replacement', observation: 'manual', sessionId: 'untrusted-session', sessionName: 'Wrong chat' });
+    assert.equal(store.state().agents[0].sessionId, live[0].sessionId);
+    assert.equal(store.state().agents[0].sessionName, live[0].sessionName);
+    const restored = createEventStore({ dataDir, normalize: normalizeEvent }), hydrated = [];
+    for (const record of restored.state().agents) updateAgentState(hydrated, record);
+    assert.equal(hydrated[0].sessionId, live[0].sessionId);
+    assert.equal(hydrated[0].sessionName, live[0].sessionName);
+  }
+});
+
+test('a legacy snapshot cannot restore a completed MCP call as active work', async t => {
+  const dataDir = await mkdtemp(join(tmpdir(), 'office-legacy-tool-lifetime-'));
+  t.after(() => rm(dataDir, { recursive: true, force: true }));
+  const incoming = event({ id: 'legacy-new-input', source: 'claude', type: 'user.instruction', status: 'thinking' });
+  createEventStore({ dataDir, normalize: normalizeEvent, initialEvents: [incoming] });
+  const path = join(dataDir, 'agents.json'), snapshot = JSON.parse(await readFile(path, 'utf8'));
+  snapshot.agents[0].toolName = 'MCP 도구';
+  await writeFile(path, JSON.stringify(snapshot), { mode: 0o600 });
+  const restored = createEventStore({ dataDir, normalize: normalizeEvent });
+  assert.equal(restored.state().agents[0].toolName, undefined);
+  const live = []; for (const record of restored.state().agents) updateAgentState(live, record);
+  assert.equal(live[0].toolName, undefined);
+});
+
+test('explicit running tools survive thinking and reload while completion still releases the name', async t => {
+  const dataDir = await mkdtemp(join(tmpdir(), 'office-thinking-tool-'));
+  t.after(() => rm(dataDir, { recursive: true, force: true }));
+  const store = createEventStore({ dataDir, normalize: normalizeEvent }), live = [];
+  const apply = fields => { const incoming = event({ type: 'agent.status', status: 'thinking', ...fields }); store.append(incoming); updateAgentState(live, incoming); };
+  apply({ id: 'thinking-tool-start', toolName: 'MCP 도구', toolPhase: 'started' });
+  apply({ id: 'thinking-tool-running', toolPhase: 'running' });
+  assert.equal(live[0].toolName, 'MCP 도구');
+  assert.equal(store.state().agents[0].toolName, 'MCP 도구');
+  const restored = createEventStore({ dataDir, normalize: normalizeEvent }), hydrated = [];
+  for (const record of restored.state().agents) updateAgentState(hydrated, record);
+  assert.equal(hydrated[0].toolName, 'MCP 도구');
+  const beforeResult = structuredClone(live);
+  apply({ id: 'thinking-tool-result', status: 'working', toolName: 'MCP 도구', toolPhase: 'completed' });
+  assert.equal(live[0].toolName, undefined);
+  assert.equal(store.state().agents[0].toolName, undefined);
+  updateAgentState(beforeResult, store.state().agents[0]);
+  assert.equal(beforeResult[0].toolName, undefined, 'a recovered complete snapshot releases a stale live tool without changing working status');
+  assert.equal(beforeResult[0].status, 'working');
+});
 
 const line = (type, payload, timestamp) => JSON.stringify({ type, payload, timestamp }) + '\n';
 const event = overrides => normalizeEvent({ source: 'codex', type: 'agent.started', agentId: 'worker',

@@ -8,6 +8,7 @@ export const activityNames: Record<ActivityKind, string> = {
 };
 export type AgentStatus = 'working' | 'thinking' | 'waiting' | 'reviewing' | 'approval' | 'done' | 'error' | 'idle';
 export type Source = 'demo' | 'codex' | 'claude' | 'manual';
+export type ToolPhase = 'started' | 'running' | 'completed' | 'failed';
 export interface OfficeEvent {
   id: string; timestamp: string; source: Source;
   type: 'agent.model' | 'agent.started' | 'agent.status' | 'agent.completed' | 'message.sent' | 'handoff' | 'approval.requested' | 'approval.resolved' | 'task.created' | 'user.instruction' | 'agent.retired' | 'session.ended';
@@ -15,7 +16,7 @@ export interface OfficeEvent {
   title: string; toAgentId?: string; toAgentName?: string; taskId?: string;
   projectId?: string; projectName?: string; sessionId?: string; sessionName?: string;
   parentAgentId?: string; model?: string; modelEvidence?: 'reported' | 'unknown';
-  observation?: 'hook' | 'app-server' | 'codex-log' | 'claude-log' | 'manual'; toolName?: string;
+  observation?: 'hook' | 'app-server' | 'codex-log' | 'claude-log' | 'manual'; toolName?: string; toolPhase?: ToolPhase;
   sessionObservation?: 'hook' | 'app-server' | 'codex-log' | 'claude-log' | 'manual';
   retired?: boolean; sessionEnded?: boolean; lastEventAt?: string;
   referenceEventId?: string; modelObservedAt?: string; taskStartedAt?: string; lastEventId?: string;

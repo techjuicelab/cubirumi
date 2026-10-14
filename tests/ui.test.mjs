@@ -382,7 +382,7 @@ test('Claude cards focus Claude details and local refresh preserves stale eviden
 async function mountOffice(t, { url = 'http://127.0.0.1:4780/', states, savedSettings,
   autoConnect = true, stateError = false, initiallyHidden = false, usage = { providers: [] }, usageFailsAfter = Infinity,
   personalSettings = { companyName: '테스트 사무실', ownerName: '예시 사장' }, settingsSaveError = false, systemReducedMotion = false,
-  instructionPlanes = false, buildingIntro = '' } = {}) {
+  instructionPlanes = false, buildingIntro = '', stateFetch, fakeTimers = false } = {}) {
   const window = new Window({ url });
   const motionPreference = new window.EventTarget();
   motionPreference.matches = systemReducedMotion;
@@ -399,6 +399,7 @@ async function mountOffice(t, { url = 'http://127.0.0.1:4780/', states, savedSet
   const requests = [];
   const settingsWrites = [];
   const intervals = new Map();
+  const timeouts = new Map();
   let intervalId = 0;
   let now = Date.parse(timestamp);
   let scene;
@@ -492,7 +493,8 @@ async function mountOffice(t, { url = 'http://127.0.0.1:4780/', states, savedSet
     if (path === '/api/state') {
       const attempt = stateRequests++;
       if (stateError && attempt === 0) throw new Error('Initial state request unavailable');
-      const state = snapshots[Math.min(attempt, snapshots.length - 1)];
+      const state = stateFetch ? await stateFetch({ attempt, source: sources[0], signal: options?.signal })
+        : snapshots[Math.min(attempt, snapshots.length - 1)];
       return { ok: true, json: async () => structuredClone(state) };
     }
     throw new Error(`Unexpected UI request: ${path}`);
@@ -510,6 +512,14 @@ async function mountOffice(t, { url = 'http://127.0.0.1:4780/', states, savedSet
       return id;
     },
     clearInterval: id => intervals.delete(id),
+    ...(fakeTimers ? {
+      setTimeout: (callback, delay, ...args) => {
+        const id = ++intervalId;
+        timeouts.set(id, { callback, args, next: now + Math.max(0, Number(delay) || 0) });
+        return id;
+      },
+      clearTimeout: id => timeouts.delete(id),
+    } : {}),
     __officeSceneForTest: OfficeScene,
   };
   const originalNow = Object.getOwnPropertyDescriptor(Date, 'now');
@@ -570,13 +580,17 @@ async function mountOffice(t, { url = 'http://127.0.0.1:4780/', states, savedSet
     },
     advance: async milliseconds => {
       const until = now + milliseconds;
-      while (intervals.size) {
-        const next = Math.min(...[...intervals.values()].map(interval => interval.next));
+      while (intervals.size || timeouts.size) {
+        const next = Math.min(...[...intervals.values(), ...timeouts.values()].map(timer => timer.next));
         if (next > until) break;
         now = next;
         for (const interval of [...intervals.values()]) if (interval.next <= now) {
           interval.next += interval.period;
           interval.callback(...interval.args);
+        }
+        for (const [id, timeout] of [...timeouts]) if (timeout.next <= now) {
+          timeouts.delete(id);
+          timeout.callback(...timeout.args);
         }
         await flush();
       }
@@ -1120,6 +1134,114 @@ test('the first SSE connection retries a failed initial snapshot and restores co
   assert.equal(ui.scene.paused, false);
   assert.deepEqual([...ui.document.querySelectorAll('[data-floor]')].map(button => button.dataset.floor), ['project-live', 'project-idle']);
   assert.deepEqual(ui.scene.agents.map(agent => agent.id), ['boss', 'worker-live']);
+});
+
+test('snapshot recovery retries an SSE-open race without duplicate requests or losing buffered work', async t => {
+  let release;
+  const firstRequest = new Promise(resolve => { release = resolve; });
+  const ui = await mountOffice(t, { autoConnect: false, fakeTimers: true, stateFetch: async ({ attempt, source }) => {
+    if (attempt === 0) {
+      source.open();
+      await firstRequest;
+      throw new Error('Initial state request unavailable');
+    }
+    return { agents: initialSnapshots(), events: [] };
+  } });
+  assert.equal(ui.stateRequests, 1);
+  await ui.emit(snapshot({ id: 'buffered-during-failure', timestamp: '2026-01-01T10:01:00.000Z', status: 'reviewing', title: '새 검토 작업' }));
+  await ui.advance(5000);
+  assert.equal(ui.stateRequests, 1, 'the open callback cannot create a concurrent snapshot request');
+  release(); await ui.flush();
+  await ui.advance(999);
+  assert.equal(ui.stateRequests, 1, 'recovery waits before retrying a failed request');
+  await ui.advance(1);
+  assert.equal(ui.stateRequests, 2, 'an already-open SSE stream still recovers the missing snapshot');
+  assert.equal(ui.get('staff-count').textContent, '2');
+  assert.equal(ui.scene.agents.find(agent => agent.id === 'worker-live')?.lastEventId, 'buffered-during-failure');
+  assert.equal(ui.scene.agents.find(agent => agent.id === 'worker-live')?.task, '새 검토 작업');
+  await ui.advance(60000);
+  assert.equal(ui.stateRequests, 2, 'a successful snapshot stops automatic retries');
+});
+
+test('snapshot recovery backs off to a bounded delay while a connected endpoint keeps failing', async t => {
+  const ui = await mountOffice(t, { autoConnect: false, fakeTimers: true, stateFetch: async ({ attempt, source }) => {
+    if (attempt === 0) source.open();
+    throw new Error('State endpoint unavailable');
+  } });
+  await ui.advance(31000);
+  assert.equal(ui.stateRequests, 6, 'failed requests wait 1, 2, 4, 8 and 16 seconds');
+  await ui.advance(29999);
+  assert.equal(ui.stateRequests, 6, 'the capped delay still avoids a request loop');
+  await ui.advance(1);
+  assert.equal(ui.stateRequests, 7, 'retry delay is capped at 30 seconds');
+});
+
+test('snapshot recovery pauses while hidden or disconnected and resumes only after recovery signals', async t => {
+  const ui = await mountOffice(t, { autoConnect: false, fakeTimers: true, stateFetch: async ({ attempt, source }) => {
+    if (attempt === 0) source.open();
+    throw new Error('State endpoint unavailable');
+  } });
+  await ui.setHidden(true); await ui.advance(60000);
+  assert.equal(ui.stateRequests, 1, 'hidden windows do not retry in the background');
+  await ui.setHidden(false);
+  assert.equal(ui.stateRequests, 2, 'visibility restores a required snapshot');
+  ui.source.disconnect(); await ui.flush(); await ui.advance(60000);
+  assert.equal(ui.stateRequests, 2, 'a disconnected stream suspends snapshot retries');
+  ui.source.open(); await ui.flush();
+  assert.equal(ui.stateRequests, 3, 'reconnection resumes snapshot recovery immediately');
+  ui.window.dispatchEvent(new ui.window.Event('pagehide')); await ui.advance(60000);
+  assert.equal(ui.stateRequests, 3, 'a disposed window cannot retry');
+});
+
+test('snapshot recovery retries a timeout and preserves a reconnect that arrived during the request', async t => {
+  const ui = await mountOffice(t, { autoConnect: false, fakeTimers: true, stateFetch: async ({ attempt, source, signal }) => {
+    if (attempt === 0) {
+      source.open(); source.disconnect(); source.open();
+      await new Promise((_resolve, reject) => signal.addEventListener('abort', () => reject(new Error('Request aborted')), { once: true }));
+    }
+    return { agents: initialSnapshots(), events: [] };
+  } });
+  await ui.advance(6000);
+  assert.equal(ui.stateRequests, 1);
+  await ui.advance(1000);
+  assert.equal(ui.stateRequests, 2, 'a timed-out request recovers without another SSE open');
+  assert.equal(ui.get('staff-count').textContent, '2');
+});
+
+test('snapshot recovery refreshes again when a successful request overlaps an SSE reconnect', async t => {
+  let release;
+  const firstRequest = new Promise(resolve => { release = resolve; });
+  const ui = await mountOffice(t, { autoConnect: false, fakeTimers: true, stateFetch: async ({ attempt, source }) => {
+    if (attempt === 0) {
+      source.open(); source.disconnect(); source.open();
+      await firstRequest;
+      return { agents: initialSnapshots(), events: [] };
+    }
+    return { agents: [snapshot({ id: 'retired-after-gap', type: 'agent.retired', retired: true })], events: [] };
+  } });
+  release(); await ui.flush(); await ui.advance(1000);
+  assert.equal(ui.stateRequests, 2, 'a successful pre-gap snapshot does not consume a later reconnect');
+  assert.equal(ui.get('staff-count').textContent, '0');
+});
+
+test('disposing snapshot recovery aborts its request and ignores late state and SSE callbacks', async t => {
+  let release, requestSignal;
+  const firstRequest = new Promise(resolve => { release = resolve; });
+  const ui = await mountOffice(t, { autoConnect: false, fakeTimers: true, stateFetch: async ({ source, signal }) => {
+    source.open(); requestSignal = signal;
+    await firstRequest;
+    return { agents: initialSnapshots(), events: [] };
+  } });
+  const agentsBefore = ui.scene.agents.map(agent => agent.id);
+  const pulsesBefore = ui.scene.routerPulses ?? 0;
+  ui.window.dispatchEvent(new ui.window.Event('pagehide'));
+  assert.equal(requestSignal.aborted, true, 'page disposal cancels the outstanding snapshot request');
+  release(); await ui.flush();
+  ui.source.open(); ui.source.disconnect();
+  await ui.emit(snapshot({ id: 'late-after-disposal' })); await ui.advance(60000);
+  assert.equal(ui.stateRequests, 1);
+  assert.deepEqual(ui.scene.agents.map(agent => agent.id), agentsBefore);
+  assert.equal(ui.scene.routerPulses ?? 0, pulsesBefore, 'late callbacks cannot mutate a disposed scene');
 });
 
 test('a large connected room reaches the scene together and camera follows observed work after a manual hold', async t => {
@@ -1798,11 +1920,16 @@ test('the work section shows an external call, and approval and error guidance, 
     if (note) assert.match(detail.querySelector('.card-note').textContent, note);
     else assert.equal(detail.querySelector('.card-note') === null, true, `${status} has no guidance note`);
     const work = detail.querySelector('.work-line')?.textContent ?? '';
-    assert.equal(/외부 서비스 연동 중/u.test(work), status === 'thinking', 'a call is shown only while a working status uses the external tool');
-    assert.equal(detail.querySelector('.call-note') !== null, status === 'thinking', 'the service-name note follows the call');
-    assert.equal(detail.querySelector('.tool-line') !== null, status === 'thinking', 'a retained tool name is shown only for working statuses');
+    assert.equal(/외부 서비스 연동 중/u.test(work), false, 'a completed call is not restored by later status-only updates');
+    assert.equal(detail.querySelector('.call-note') !== null, false, 'the service-name note follows an active call');
+    assert.equal(detail.querySelector('.tool-line') !== null, false, 'a completed tool name cannot become current again');
     if (status === 'error') assert.match(work, /자료 조사.*도구 기준 추정/u);
   }
+  await ui.emit(snapshot({ id: 'next-external-call', status: 'working', timestamp: '2026-01-01T10:05:00.000Z',
+    toolName: 'MCP 도구', toolPhase: 'started', activityKind: 'research' }));
+  assert.equal(detail.querySelector('.work-line').textContent, '외부 서비스 연동 중');
+  assert.equal(detail.querySelector('.tool-chip').textContent, 'MCP 도구');
+  assert.equal(detail.querySelector('.call-note') !== null, true);
 });
 
 test('a lost connection dims the card, keeps the last status and shows the last observation time instead of live rows', async t => {

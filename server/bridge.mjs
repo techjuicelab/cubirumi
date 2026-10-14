@@ -19,6 +19,7 @@ const EVENT_TYPES = new Set([
 ]);
 const MODEL_EVIDENCE = new Set(['reported', 'unknown']);
 const ACTIVITIES = new Set(ACTIVITY_KINDS);
+const TOOL_PHASES = new Set(['started', 'running', 'completed', 'failed']);
 const OBSERVATIONS = new Set(['hook', 'app-server', 'codex-log', 'claude-log', 'manual']);
 const API_PATHS = ['/api/health', '/api/events', '/api/history', '/api/state', '/api/settings', '/api/usage'];
 const STATUSES = new Set([
@@ -106,6 +107,8 @@ export function normalizeEvent(input) {
   }
   const status = enumField(input, 'status', STATUSES);
   if (status !== undefined) event.status = status;
+  const toolPhase = enumField(input, 'toolPhase', TOOL_PHASES);
+  if (toolPhase !== undefined && type === 'agent.status') event.toolPhase = toolPhase;
   const activityKind = enumField(input, 'activityKind', ACTIVITIES);
   if (activityKind !== undefined && !['agent.model', 'message.sent', 'agent.completed', 'agent.retired', 'session.ended'].includes(type)
     && !['idle', 'done', 'waiting'].includes(status)) event.activityKind = activityKind;

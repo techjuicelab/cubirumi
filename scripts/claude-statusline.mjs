@@ -61,21 +61,27 @@ export function usageEndpoint(value = DEFAULT_ENDPOINT) {
 export async function reportClaudeUsage(input, endpoint = process.env.AGENT_OFFICE_USAGE_ENDPOINT || DEFAULT_ENDPOINT, { observedAt } = {}) {
   try {
     let observedTime = Date.now();
-    if (observedAt !== undefined && observedAt !== null) {
+    if (observedAt === null) observedTime = null;
+    else if (observedAt !== undefined) {
       if (typeof observedAt !== 'string' || observedAt.length > 40
         || !/^\d{4}-\d{2}-\d{2}T.*(?:Z|[+-]\d{2}:\d{2})$/.test(observedAt)) return false;
       observedTime = Date.parse(observedAt);
       if (!Number.isFinite(observedTime) || observedTime > Date.now() + 60_000) return false;
     }
+    const usage = normalizeClaudeUsage(input, observedTime ?? Date.now());
+    // A missing response time cannot establish the freshness of cached rate-limit numbers. The usage
+    // store retains its previous measurement and marks it stale when this read-failed report arrives.
+    if (observedTime === null && usage.windows.length) Object.assign(usage,
+      { status: 'unavailable', updatedAt: null, reason: 'read-failed', windows: [] });
     const response = await fetch(usageEndpoint(endpoint), { method: 'POST', redirect: 'error',
-      headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(normalizeClaudeUsage(input, observedTime)),
+      headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(usage),
       signal: AbortSignal.timeout(700) });
     await response.body?.cancel();
     return response.ok;
   } catch { return false; }
 }
 
-function startReporter(usage, endpoint) {
+function startReporter(usage, endpoint, observedAt = usage.updatedAt) {
   // Only allowlisted numbers and their observation time enter the detached process. The original statusline
   // JSON, transcript path, model, account, and workspace fields never leave here.
   const rate_limits = Object.fromEntries(usage.windows.map(window => [window.id,
@@ -87,7 +93,7 @@ function startReporter(usage, endpoint) {
     });
     child.on('error', () => {});
     child.stdin.on('error', () => {});
-    child.stdin.end(JSON.stringify({ rate_limits, observedAt: usage.updatedAt }));
+    child.stdin.end(JSON.stringify({ rate_limits, observedAt }));
     child.unref();
   } catch { /* An unavailable office must never break the existing status line. */ }
 }
@@ -95,11 +101,11 @@ function startReporter(usage, endpoint) {
 export async function runStatusline(input, config = {}) {
   let parsed;
   try { parsed = JSON.parse(input.toString('utf8')); } catch { parsed = {}; }
-  // Stamp the numbers with the response they came from; fall back to now only when the session record is unreadable.
-  const hasLimits = normalizeClaudeUsage(parsed).windows.length > 0;
-  const responseAt = hasLimits ? await lastResponseAt(parsed?.transcript_path) : null;
-  const usage = normalizeClaudeUsage(parsed, responseAt ?? Date.now());
-  startReporter(usage, process.env.AGENT_OFFICE_USAGE_ENDPOINT || config.endpoint || DEFAULT_ENDPOINT);
+  // Preserve the existing local display, but publish numbers only with a proven response timestamp.
+  const usage = normalizeClaudeUsage(parsed);
+  const responseAt = usage.windows.length ? await lastResponseAt(parsed?.transcript_path) : null;
+  startReporter(usage, process.env.AGENT_OFFICE_USAGE_ENDPOINT || config.endpoint || DEFAULT_ENDPOINT,
+    responseAt === null ? null : new Date(responseAt).toISOString());
   const command = config.previousStatusLine?.command;
   if (typeof command !== 'string' || !command.trim()) {
     process.stdout.write(usage.windows.length

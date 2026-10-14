@@ -2,7 +2,7 @@ import test from 'node:test';
 import assert from 'node:assert/strict';
 import { createServer } from 'node:http';
 import { spawn } from 'node:child_process';
-import { mkdtemp, mkdir, writeFile, rm, realpath, symlink, appendFile } from 'node:fs/promises';
+import { mkdtemp, mkdir, writeFile, rm, realpath, symlink, appendFile, opendir, utimes } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { fileURLToPath } from 'node:url';
@@ -90,10 +90,14 @@ test('Claude tool kinds follow their own result IDs while parallel work, unknown
   await pollClaudeObserver(f.options);
   const at = offset => f.events.find(event => event.timestamp === new Date(NOW + offset).toISOString() && event.type !== 'message.sent');
   assert.equal(at(10).activityKind, 'documents'); assert.equal(at(20).activityKind, 'coding');
+  assert.equal(at(10).toolPhase, 'started'); assert.equal(at(20).toolPhase, 'started');
   assert.equal(at(30).activityKind, 'coding'); assert.equal(at(30).status, 'working', 'an earlier result cannot stop a different running tool');
+  assert.equal(at(30).toolPhase, 'running'); assert.equal(at(30).toolName, 'Edit');
   assert.equal(at(40).activityKind, 'coding'); assert.equal(at(40).status, 'thinking');
+  assert.equal(at(40).toolPhase, 'completed');
   assert.equal(at(50).activityKind, 'general', 'a result without its observed call cannot borrow the last kind');
   assert.equal(at(60).activityKind, 'testing'); assert.equal(at(70).activityKind, 'testing'); assert.equal(at(70).status, 'error');
+  assert.equal(at(70).toolPhase, 'failed');
   assert.equal(at(80).type, 'agent.completed'); assert.equal(at(80).activityKind, undefined);
   assert.doesNotMatch(JSON.stringify(f.events), /PRIVATE|tool_use_id|file_path|new_string|command/);
 });
@@ -133,6 +137,29 @@ test('bounded Claude polling reaches large quiet transcripts fairly across the b
   const count = f.events.length;
   await pollClaudeObserver({ ...f.options, discoveryCache, now: NOW + 12_000 });
   assert.equal(f.events.length, count, 'finished transcripts remain deduplicated on a later turn');
+});
+
+test('512 known quiet transcripts cannot block discovery of the newest conversation after them', async t => {
+  const f = await fixture(t), discoveryCache = {};
+  for (let index = 0; index < 513; index++) await f.file(`capped-${String(index).padStart(3, '0')}.jsonl`, []);
+  const names = [];
+  for await (const entry of await opendir(f.project)) names.push(entry.name);
+  const latestName = names.at(-1), latestSession = latestName.slice(0, -6), oldTime = NOW - 600_000;
+  f.state.agents = names.slice(0, 512).map(name => {
+    const sessionId = name.slice(0, -6);
+    return { source: 'claude', agentId: id(null, sessionId), sessionId, id: `known-${sessionId}`,
+      type: 'agent.status', status: 'thinking', timestamp: new Date(oldTime).toISOString() };
+  });
+  for (const name of names.slice(0, 512)) await utimes(join(f.project, name), oldTime / 1000, oldTime / 1000);
+  await f.file(latestName, [user(0, { sessionId: latestSession })]);
+  await utimes(join(f.project, latestName), NOW / 1000, NOW / 1000);
+  for (let round = 0; round < 3; round++) {
+    discoveryCache.nextAt = 0;
+    const events = await collectClaudeEvents(f.state, { ...f.options, discoveryCache, now: NOW + 1000 + round * 16_000 });
+    assert.ok(events.some(event => event.type === 'user.instruction' && event.sessionId === latestSession),
+      'newest conversation beyond the first 512 directory entries is observed on every fresh discovery');
+    assert.equal(discoveryCache.files.length, 512, 'the discovered inventory stays bounded');
+  }
 });
 
 async function fixture(t, state = { agents: [] }) {

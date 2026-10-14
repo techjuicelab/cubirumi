@@ -56,6 +56,27 @@ test('raw prompt, command, reasoning, output and arguments are excluded',()=>{
   assert.ok(events.every(e=>e.observation==='codex-log'));
 });
 
+test('Codex tool phases distinguish starts from parallel result updates and reconnect snapshots',()=>{
+  const state=new RolloutState({...row,parent_thread_id:null});state.consume(start('t'));
+  const call=(id,name)=>state.consume(record('response_item',{type:'function_call',name,call_id:id,arguments:'{}'}))[0];
+  const output=(id,result='{}')=>state.consume(record('response_item',{type:'function_call_output',call_id:id,output:result}))[0];
+  assert.equal(call('read','Read').toolPhase,'started');
+  assert.equal(call('mcp','mcp__fixture__lookup').toolPhase,'started');
+  const modelUpdate=state.consume(context('t','actual-model'))[0];
+  assert.equal(modelUpdate.toolPhase,'running');assert.equal(modelUpdate.toolName,'MCP 도구');
+  assert.equal(state.snapshot().toolPhase,'running');
+  assert.equal(state.snapshot().toolName,'MCP 도구');
+  const remaining=output('read');
+  assert.equal(remaining.status,'working');assert.equal(remaining.toolPhase,'running');assert.equal(remaining.toolName,'MCP 도구');
+  const finished=output('mcp');
+  assert.equal(finished.status,'thinking');assert.equal(finished.toolPhase,'completed');
+  assert.equal(state.snapshot().toolName,undefined);
+  call('failure','Bash');assert.equal(output('failure','{"isError":true}').toolPhase,'failed');
+  for(const item of [{type:'CommandExecution',exit_code:0},{type:'McpToolCall',status:'completed'},{type:'FileChange',changes:{}}]) {
+    assert.equal(state.consume(record('event_msg',{type:'item_completed',turn_id:'t',item}))[0].toolPhase,'completed');
+  }
+});
+
 test('Codex visible assistant messages emit once without replacing completion or exposing content',()=>{
   const state=new RolloutState({...row,parent_thread_id:null});state.consume(start('t'));
   const visible=(id,extra={})=>record('response_item',{type:'message',role:'assistant',id,content:[{type:'output_text',text:'PRIVATE RESPONSE'}],...extra});
@@ -233,7 +254,7 @@ async function burstFixture(t) {
     const observer=new CodexLogObserver({dbPath,sessionsDir:dir,previous,send:async event=>{events.push(event);store.append(normalizeEvent(event));}});
     observers.add(observer);return observer;
   };
-  return {path,line,events,store,create,close(observer){observer.close();observers.delete(observer);}};
+  return {dbPath,path,line,events,store,create,close(observer){observer.close();observers.delete(observer);}};
 }
 
 test('Codex bursts advance one bounded chunk per poll and finish after an oversized JSONL record',async t=>{
@@ -285,6 +306,41 @@ test('a restart recovers only the saved active turn completion when a large tail
   assert.equal(f.events.length,count,'a completed restart does not replay completion');
   const unrelated=f.create(previous.map(entry=>({...entry,turnId:'other-turn'})));await unrelated.poll();
   assert.equal(f.events.length,count,'a tail cannot complete a different saved turn');
+});
+
+test('a restart restores the latest explicit finish after another turn starts and ends while disconnected',async t=>{
+  for(const terminalType of ['task_complete','turn_aborted']) {
+    const f=await burstFixture(t),observer=f.create();
+    await observer.poll();const previous=observer.savedState().threads;f.close(observer);
+    const terminal=f.line('event_msg',{type:terminalType,turn_id:'next-turn'},100);
+    await appendFile(f.path,f.line('event_msg',{type:'task_complete',turn_id:'burst-turn'},10)
+      +f.line('event_msg',{type:'task_started',turn_id:'next-turn'},20)+terminal);
+    const restored=f.create(previous);const report=await restored.poll();
+    assert.equal(report.active,0);
+    assert.equal(f.events.length,2,'only the latest explicit finish is restored, without replaying historical work');
+    assert.equal(f.events[1].status,terminalType==='task_complete'?'done':'waiting');
+    assert.equal(f.events[1].timestamp,JSON.parse(terminal).timestamp);
+    assert.equal(f.store.state().agents[0].status,terminalType==='task_complete'?'idle':'waiting');
+    assert.notEqual(f.events[1].taskId,f.events[0].taskId);
+    const count=f.events.length;
+    await f.create(restored.savedState().threads).poll();
+    await f.create().poll();
+    assert.equal(f.events.length,count,'completed cursors and previously unseen history do not replay a finish');
+  }
+});
+
+test('a child restart restores its own later turn but never a copied parent turn',async t=>{
+  for(const owner of ['worker','parent']) {
+    const f=await burstFixture(t),db=new DatabaseSync(f.dbPath);
+    db.prepare('INSERT INTO thread_spawn_edges VALUES(?,?)').run('worker','parent');db.close();
+    await appendFile(f.path,f.line('event_msg',{type:'task_started',turn_id:'burst-turn',thread_id:'worker'},-1000));
+    const observer=f.create();await observer.poll();const previous=observer.savedState().threads;f.close(observer);
+    await appendFile(f.path,f.line('event_msg',{type:'task_started',turn_id:'next-turn',thread_id:owner},10)
+      +f.line('event_msg',{type:'task_complete',turn_id:'next-turn',thread_id:owner},20));
+    await f.create(previous).poll();
+    assert.equal(f.events.length,owner==='worker'?2:1);
+    assert.equal(f.store.state().agents[0].status,owner==='worker'?'idle':'working');
+  }
 });
 
 test('restarting while a large-tail completion lacks its newline preserves the known turn until the record finishes',async t=>{

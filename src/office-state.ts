@@ -1,5 +1,5 @@
 import { colors, initialAgents, sourceNames, type Agent, type OfficeEvent } from './protocol.ts';
-import { nextActivityKind } from '../integrations/claude-plugin/scripts/activity-kind.mjs';
+import { nextActivityKind, nextToolName } from '../integrations/claude-plugin/scripts/activity-kind.mjs';
 
 export const UNKNOWN_PROJECT = '__unreported_project__';
 export const UNKNOWN_SESSION = '__unreported_session__';
@@ -51,6 +51,7 @@ export function updateAgentState(agents: Agent[], event: OfficeEvent): Agent | u
       item.status = 'idle';
       item.lastEventAt = event.timestamp;
       delete item.activityKind;
+      delete item.toolName;
     }
   }
   if (!agent) {
@@ -91,7 +92,7 @@ export function updateAgentState(agents: Agent[], event: OfficeEvent): Agent | u
   } else if (event.sessionName !== undefined && incomingAuthority >= existingAuthority && (!event.sessionId || event.sessionId === agent.sessionId)) {
     agent.sessionName = event.sessionName;
   }
-  for (const key of ['projectId', 'projectName', 'parentAgentId', 'observation', 'toolName'] as const) {
+  for (const key of ['projectId', 'projectName', 'parentAgentId', 'observation'] as const) {
     if (event[key] !== undefined) Object.assign(agent, { [key]: event[key] });
   }
   if (event.modelEvidence === 'reported' && event.model) {
@@ -113,6 +114,9 @@ export function updateAgentState(agents: Agent[], event: OfficeEvent): Agent | u
   }
   if (event.retired !== undefined) agent.retired = event.retired;
   if (event.sessionEnded !== undefined) agent.sessionEnded = event.sessionEnded;
+  const toolName = nextToolName(taskChanged ? undefined : agent.toolName, event, agent.status);
+  if (toolName === undefined) delete agent.toolName;
+  else agent.toolName = toolName;
   const activityKind = nextActivityKind(taskChanged ? undefined : agent.activityKind, event, agent.status);
   if (activityKind === undefined) delete agent.activityKind;
   else agent.activityKind = activityKind;

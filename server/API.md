@@ -56,6 +56,7 @@ POST는 `Content-Type: application/json`과 최대 16 KiB 본문을 받습니다
 | `type` | `agent.started`, `agent.status`, `agent.completed`, `message.sent`, `handoff`, `approval.requested`, `approval.resolved`, `task.created`, `user.instruction`, `agent.retired`, `session.ended`, `agent.model` |
 | 선택적 `status` | `working`, `thinking`, `waiting`, `reviewing`, `approval`, `done`, `error`, `idle` |
 | 선택적 `activityKind` | `coding`, `documents`, `research`, `testing`, `reviewing`, `planning`, `design`, `delivery`, `shipping`, `general` |
+| 선택적 `toolPhase` | `agent.status`에서 `started`, `running`, `completed`, `failed`. 생략한 기존 이벤트도 지원 |
 | 선택적 `observation` | `hook`, `app-server`, `codex-log`, `claude-log`, `manual` |
 | `id`, `taskId`, `projectId`, `sessionId`, `parentAgentId` | 1~120자 |
 | `agentId`, `toAgentId`, `title`, `sessionName` | 1~160자 |
@@ -82,6 +83,8 @@ POST는 `Content-Type: application/json`과 최대 16 KiB 본문을 받습니다
 ## 현재 직원 상태
 
 `activityKind`는 로컬에서 확인한 업무 종류만 담습니다. 도구 인수·파일 경로·명령 원문을 포함하지 않습니다. 알 수 없는 새 도구 사용은 `general`, 응답 종료·대기·퇴근은 종류를 지우며 모델 보정은 기존 종류를 유지합니다. 종류가 다른 병렬 도구 호출은 `general`로 단순화하고 결과는 실제 호출 ID에 맞춰 연결합니다. [업무 애니메이션 기준](../docs/ACTIVITY_ANIMATIONS.md)
+
+`toolPhase`는 도구 호출의 관측 단계입니다. `started`만 도구 시작 집계에 포함하고, 병렬 도구 중 다른 호출이 남은 결과는 `running`으로 보고해 시작을 중복 집계하지 않습니다. `completed`·`failed`, 응답 종료, 새 업무 지시에서는 현재 `toolName`을 지웁니다. 직원 snapshot은 진행 중인 도구만 `toolPhase: "running"`으로 보존하므로 snapshot 복구 자체가 새 도구 시작으로 집계되지 않습니다. 단계가 없는 이전 hook·로그 이벤트는 기존 시작 문구를 인식하며, 새 이벤트는 제목 번역이나 표시 문구에 의존하지 않습니다.
 
 `/api/state.agents`는 최대 512명의 최신 메타데이터 snapshot입니다. 각 항목은 이벤트와 같은 `id`, `timestamp`, `type`, `agentId`, `source`, `title` 및 선택적 메타데이터를 포함하며 다음 필드를 추가합니다.
 

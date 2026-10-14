@@ -9,6 +9,7 @@ import { join } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { lastResponseAt, normalizeClaudeUsage, reportClaudeUsage, usageEndpoint } from '../scripts/claude-statusline.mjs';
 import { installStatusline, shellQuote } from '../scripts/install-claude.mjs';
+import { createUsageStore } from '../server/usage.mjs';
 
 const root = fileURLToPath(new URL('../', import.meta.url));
 const fixture = {
@@ -106,7 +107,8 @@ test('statusline wrapper preserves exact stdin and existing stdout while sending
   const result = await run(input, configPath);
   assert.deepEqual(result, { code: 0, stdout: `\u001b[32mExisting\u001b[0m ${createHash('sha256').update(input).digest('hex')}`, stderr: '' });
   const report = await waitForReport(target.received);
-  assert.equal(report.body.windows[1].usedPercent, 0);
+  assert.equal(report.body.status, 'unavailable');
+  assert.equal(report.body.reason, 'read-failed', 'missing transcript evidence cannot refresh existing numbers');
   assert.doesNotMatch(JSON.stringify(report), /PRIVATE/u);
   await writeFile(configPath, JSON.stringify({ endpoint: 'http://127.0.0.1:1/api/usage' }));
   const unknown = await run('{}', configPath);
@@ -121,7 +123,8 @@ test('the statusline environment endpoint overrides the saved receiver without e
   const result = await run(JSON.stringify(fixture), configPath, { AGENT_OFFICE_USAGE_ENDPOINT: target.endpoint });
   assert.equal(result.code, 0);
   const report = await waitForReport(target.received);
-  assert.equal(report.body.windows[0].usedPercent, 23.5);
+  assert.equal(report.body.status, 'unavailable');
+  assert.equal(report.body.reason, 'read-failed');
   assert.doesNotMatch(JSON.stringify(report), /PRIVATE/u);
 });
 
@@ -147,6 +150,34 @@ test('an idle session refresh reports when its numbers were received, not when t
   const report = await waitForReport(target.received);
   assert.equal(report.body.updatedAt, lastResponse);
   assert.doesNotMatch(JSON.stringify(report), /PRIVATE/u);
+});
+
+test('unreadable response timestamps never refresh quota numbers and preserve the previous usage observation', async t => {
+  const directory = await temporary(t), transcript = join(directory, 'oversized.jsonl');
+  const observedAt = new Date(Date.now() - 60 * 60_000).toISOString();
+  await writeFile(transcript, JSON.stringify({ type: 'assistant', timestamp: observedAt }) + '\n'
+    + JSON.stringify({ type: 'user', timestamp: new Date().toISOString(), message: { content: 'x'.repeat(1024 * 1024 + 100) } }) + '\n');
+  assert.equal(await lastResponseAt(transcript), null, 'timestamp lookup keeps its bounded tail read');
+  for (const transcriptPath of [transcript, join(directory, 'missing.jsonl')]) {
+    const target = await receiver(t), configPath = join(directory, 'statusline.json');
+    await writeFile(configPath, JSON.stringify({ endpoint: target.endpoint }));
+    const result = await run(JSON.stringify({ ...fixture, transcript_path: transcriptPath }), configPath);
+    assert.deepEqual(result, { code: 0, stdout: 'Agent Office · 5시간 76.5% 남음 · 주간 100% 남음\n', stderr: '' },
+      'a missing timestamp does not alter the local statusline display');
+    const report = (await waitForReport(target.received)).body;
+    assert.equal(report.status, 'unavailable');
+    assert.equal(report.updatedAt, null);
+    assert.equal(report.reason, 'read-failed');
+    assert.deepEqual(report.windows, []);
+    const store = createUsageStore();
+    store.update(normalizeClaudeUsage(fixture, Date.parse(observedAt)));
+    store.update(report);
+    const saved = store.state().providers.find(provider => provider.provider === 'claude');
+    assert.equal(saved.updatedAt, observedAt);
+    assert.equal(saved.status, 'stale');
+    assert.equal(saved.windows[0].usedPercent, 23.5);
+    assert.doesNotMatch(JSON.stringify(report), /PRIVATE|transcript|prompt/u);
+  }
 });
 
 test('statusline installer preserves unrelated settings and original command on repeated installs', async t => {

@@ -1,10 +1,40 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import { modelColor, owner, pageAgents, projectKey, sessionKey, updateAgentState, summarizeOfficeActivity, UNKNOWN_PROJECT, UNKNOWN_SESSION } from '../src/office-state.ts';
+import { normalizeLifecycle } from '../integrations/claude-plugin/scripts/adapter-core.mjs';
+import { isExternalCall } from '../src/status-style.ts';
 
 let sequence = 0;
-const event = (fields = {}) => ({ id: `event-${++sequence}`, timestamp: `2026-09-12T12:00:${String(sequence).padStart(2,'0')}Z`,
+const event = (fields = {}) => ({ id: `event-${++sequence}`, timestamp: new Date(Date.UTC(2026, 8, 12, 12, 0, sequence)).toISOString(),
   type: 'agent.status', agentId: 'codex-root', source: 'codex', title: '도구를 실행했어요', ...fields });
+
+test('Claude hook results and new prompts release completed external tool metadata', () => {
+  const agents = [];
+  let employee;
+  for (const [index, hook] of ['PreToolUse', 'PostToolUse', 'Stop', 'UserPromptSubmit'].entries()) {
+    const incoming = normalizeLifecycle({ session_id: 'tool-lifetime', hook_event_name: hook,
+      ...(['PreToolUse', 'PostToolUse'].includes(hook) ? { tool_name: 'mcp__private__service' } : {}) });
+    employee = updateAgentState(agents, { ...incoming, timestamp: `2026-10-14T01:00:0${index}.000Z` });
+    assert.equal(isExternalCall(employee), hook === 'PreToolUse', hook);
+    assert.equal(employee.toolName, hook === 'PreToolUse' ? 'MCP 도구' : undefined, hook);
+  }
+  assert.equal(employee.status, 'thinking');
+});
+
+test('new task boundaries, explicit failure and session closure release tool metadata for every affected worker', () => {
+  const agents = [];
+  const emit = fields => updateAgentState(agents, { ...event(), timestamp: '2026-10-14T02:00:00.000Z', ...fields });
+  const first = emit({ taskId: 'old', sessionId: 'tools', status: 'working', toolName: 'MCP 도구', toolPhase: 'started' });
+  emit({ taskId: 'new', status: 'thinking' });
+  assert.equal(first.toolName, undefined);
+  emit({ toolName: 'MCP 도구', toolPhase: 'started', status: 'working' });
+  emit({ toolName: 'MCP 도구', toolPhase: 'failed', status: 'error' });
+  assert.equal(first.toolName, undefined);
+  const child = emit({ agentId: 'tool-child', sessionId: 'tools', toolName: 'MCP 도구', toolPhase: 'started', status: 'working' });
+  emit({ type: 'session.ended', sessionId: 'tools' });
+  assert.equal(child.toolName, undefined);
+  assert.equal(child.status, 'idle');
+});
 
 test('reported model changes update clothing while preserving employee identity and name', () => {
   const agents = [owner()];

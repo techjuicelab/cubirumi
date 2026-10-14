@@ -95,7 +95,9 @@ export class RolloutState {
     };
     const modelEvidence=title=>{
       // 실행 모델 확인은 최근 작업 상태를 보강하며 새 활동 시각을 만들지 않습니다.
-      if(emit)out.push(this.event('agent.status',this.status,title,{timestamp:this.lastEventAt ?? observedAt}));
+      const pending=[...this.pending.values()].at(-1);
+      if(emit)out.push(this.event('agent.status',this.status,title,{timestamp:this.lastEventAt ?? observedAt,
+        ...(pending?{toolName:pending.tool,toolPhase:'running',activityKind:pending.activityKind}:{})}));
     };
     const input=()=>{
       if(!this.active){this.awaitingInput=true;return;}
@@ -146,14 +148,15 @@ export class RolloutState {
         const item=p.item;
         if(item?.type==='UserMessage')input();
         if(item?.type==='CommandExecution')add('agent.status',item.exit_code!==null && item.exit_code!==undefined && item.exit_code!==0?'error':'thinking','명령 실행 결과 수신',
-          {toolName:'Bash',activityKind:classifyActivity('Bash',{command:item.command})});
+          {toolName:'Bash',toolPhase:item.exit_code!==null && item.exit_code!==undefined && item.exit_code!==0?'failed':'completed',
+            activityKind:classifyActivity('Bash',{command:item.command})});
         if(item?.type==='FileChange') {
           const changes=item.changes && typeof item.changes==='object' && !Array.isArray(item.changes)?Object.keys(item.changes).slice(0,128):[];
-          add('agent.status','working','파일 변경 기록 확인',{toolName:'apply_patch',
+          add('agent.status','working','파일 변경 기록 확인',{toolName:'apply_patch',toolPhase:'completed',
             activityKind:classifyActivity('apply_patch',changes.map(path=>`*** Update File: ${path}`).join('\n'))});
         }
         if(item?.type==='McpToolCall')add('agent.status',item.status==='failed'?'error':'thinking','MCP 도구 결과 수신',
-          {toolName:'MCP 도구',activityKind:classifyActivity(item.tool,item.arguments)});
+          {toolName:'MCP 도구',toolPhase:item.status==='failed'?'failed':'completed',activityKind:classifyActivity(item.tool,item.arguments)});
       }
       return out;
     }
@@ -181,7 +184,7 @@ export class RolloutState {
         this.pending.set(p.call_id,{tool:label,recipient,messageCall,activityKind});
         if(this.pending.size>128)this.pending.delete(this.pending.keys().next().value);
       }
-      add('agent.status','working',`${label} 실행 중`,{toolName:label,activityKind});
+      add('agent.status','working',`${label} 실행 중`,{toolName:label,toolPhase:'started',activityKind});
     } else if(['function_call_output','custom_tool_call_output'].includes(p.type)) {
       const pending=this.pending.get(p.call_id);
       if(!pending)return out;
@@ -197,19 +200,21 @@ export class RolloutState {
       } catch { failed=typeof p.output==='string' && /^\s*(?:error|failed)\b/iu.test(p.output); }
       const active=[...this.pending.values()].at(-1);
       const resumed=active ?? pending;
-      if(failed)add('agent.status','error',`${pending.tool} 실행 실패`,{toolName:pending.tool,activityKind:pending.activityKind});
+      if(failed)add('agent.status','error',`${pending.tool} 실행 실패`,{toolName:pending.tool,toolPhase:'failed',activityKind:pending.activityKind});
       else if(pending.recipient && (confirmed || p.output===''))add('handoff','working',confirmed?'에이전트에게 자료 전달 확인':'에이전트에게 메시지 전달 요청',
-        {toAgentId:agentId(pending.recipient),toolName:resumed.tool,activityKind:resumed.activityKind});
+        {toAgentId:agentId(pending.recipient),toolName:resumed.tool,toolPhase:active?'running':'completed',activityKind:resumed.activityKind});
       else if(pending.messageCall && (confirmed || p.output===''))message(`tool:${p.call_id}`,'메시지 전달 요청 · 수신자 미확인',{toolName:pending.tool});
       else add('agent.status',active?'working':'thinking',active?`${active.tool} 실행 중`:`${pending.tool} 결과 수신`,
-        {toolName:resumed.tool,activityKind:resumed.activityKind});
+        {toolName:resumed.tool,toolPhase:active?'running':'completed',activityKind:resumed.activityKind});
     }
     return out;
   }
 
   snapshot() {
     if(!this.active || (this.metadata.parent_thread_id && !this.ownTurns.has(this.turnId)))return null;
-    return this.event('agent.status',this.status,'실행 중인 Codex 작업 관측',{timestamp:this.lastEventAt ?? new Date().toISOString()});
+    const pending=[...this.pending.values()].at(-1);
+    return this.event('agent.status',this.status,'실행 중인 Codex 작업 관측',{timestamp:this.lastEventAt ?? new Date().toISOString(),
+      ...(pending?{toolName:pending.tool,toolPhase:'running',activityKind:pending.activityKind}:{})});
   }
 }
 
@@ -309,7 +314,7 @@ export class CodexLogObserver {
         if(!entry || info.size<entry.offset) {
           const state=new RolloutState(row,{rootSessionId:row.rootSessionId,resolveRecipient:target=>resolveMessageRecipient(rows,row,target)});
           const previous=entry?{turnId:entry.state.turnId,active:entry.state.active||entry.resumePending,observed:entry.state.observed}:this.previous.get(row.id);
-          // 시작 줄이 tail 밖이어도 저장된 동일 턴의 명시적 종료만 복구합니다. 새 활동은 만들지 않습니다.
+          // 시작 줄이 tail 밖이어도 저장된 동일 턴의 종료를 읽을 수 있도록 정체만 복구합니다.
           const canRecover=previous?.active && previous.observed && typeof previous.turnId==='string';
           if(canRecover)state.turnId=previous.turnId;
           const start=Math.max(0,info.size-MAX_READ);
@@ -326,7 +331,10 @@ export class CodexLogObserver {
             state.active=false;entry.resumePending=false;entry.archived=true;
           }
           else if(snapshot){await this.forward([snapshot]);state.observed=true;}
-          else if(previous?.active && previous.observed && previous.turnId===state.turnId && ['done','waiting'].includes(state.status)) {
+          // 관측 중단 동안 다음 턴까지 끝났다면 재생으로 확인한 최신 종료를 복구합니다.
+          // 처음 보는 역사나 하위 직원에 복사된 부모 턴의 종료는 발행하지 않습니다.
+          else if(canRecover && ['done','waiting'].includes(state.status)
+            && (previous.turnId===state.turnId || !row.parent_thread_id || state.ownTurns.has(state.turnId))) {
             await this.forward([state.event(state.status==='done'?'agent.completed':'agent.status',state.status,'관측 재연결: 작업 종료 확인',
               {timestamp:state.lastEventAt ?? new Date().toISOString()})]);state.observed=true;
           }

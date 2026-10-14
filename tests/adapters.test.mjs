@@ -49,6 +49,7 @@ test('Claude lifecycle fixtures preserve identities without raw content or inven
   assert.equal(start.agentId,stop.agentId);
   assert.equal(start.agentId,tool.agentId);
   assert.equal(tool.title,'Read 실행 중');
+  assert.equal(tool.toolPhase,'started');
   for (const event of [start,stop,tool]) {
     assert.notEqual(event.type,'handoff');
     assert.doesNotMatch(JSON.stringify(event),/PRIVATE|SECRET|private\/secret|fixture-child/);
@@ -67,6 +68,8 @@ test('approval and tool failure labels are metadata-only', () => {
   assert.equal(unknown.title,'도구 실행 중');
   const failure=normalizeLifecycle({...fixture,hook_event_name:'PostToolUseFailure',tool_name:'Bash',error:'SECRET ERROR'});
   assert.equal(failure.status,'error');
+  assert.equal(failure.toolPhase,'failed');
+  assert.equal(normalizeLifecycle({...fixture,hook_event_name:'PostToolUse',tool_name:'Read'}).toolPhase,'completed');
   assert.doesNotMatch(JSON.stringify([approval,unknown,failure]),/SECRET|sensitive/);
 });
 

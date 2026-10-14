@@ -165,3 +165,15 @@ export function nextActivityKind(previous, event, status) {
   if (event.toolName || ['agent.started', 'task.created', 'user.instruction'].includes(event.type)) return 'general';
   return isActivityKind(previous) ? previous : undefined;
 }
+
+/** A tool name describes a currently running call, not the employee's last completed tool. */
+export function nextToolName(previous, event, status) {
+  if (['agent.started', 'task.created', 'user.instruction', 'agent.completed', 'agent.retired', 'session.ended'].includes(event.type)
+    || event.retired === true || event.sessionEnded === true || !['working', 'thinking', 'reviewing'].includes(status)
+    || ['completed', 'failed'].includes(event.toolPhase)) return undefined;
+  if (event.toolPhase === 'started') return event.toolName;
+  if (event.toolPhase === 'running') return event.toolName ?? previous;
+  if (status === 'thinking') return undefined;
+  if (event.lastEventAt !== undefined) return event.toolName;
+  return event.toolName ?? previous;
+}

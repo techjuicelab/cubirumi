@@ -139,15 +139,21 @@ function eventModel(event: ObservationEvent, agent: Agent | undefined): string |
   if (explicit) return explicit;
   // A current employee's model is not evidence for another explicitly identified turn.
   if (!agent || (event.taskId && event.taskId !== agent.taskId)) return undefined;
+  const boundary = Date.parse(agent.taskStartedAt ?? '');
+  const observed = Date.parse(event.timestamp);
+  if (Number.isFinite(boundary)) {
+    if (!Number.isFinite(observed) || observed < boundary) return undefined;
+  } else if (!event.taskId || event.taskId !== agent.taskId) return undefined;
   return reportedModel(agent);
 }
 
 function isToolStart(event: ObservationEvent): boolean {
   if (event.type === 'tool.started') return true;
+  if (event.toolPhase !== undefined) return event.type === 'agent.status' && event.toolPhase === 'started';
   const name = event.toolName?.trim();
   // Legacy hooks have no tool.started type. Do not count post-tool results/model confirmations.
   return event.type === 'agent.status' && event.status === 'working' && Boolean(name)
-    && event.title === `${name} 실행 중`;
+    && (event.title === `${name} 실행 중` || event.observation === 'claude-log' && event.title === `${name} 실행 기록`);
 }
 
 /**

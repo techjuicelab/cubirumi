@@ -109,9 +109,9 @@ export function normalizeLifecycle(payload, source = 'claude', timestamp = new D
     case 'SubagentStart':
       if (agent === 'main') return null;
       return state('agent.started', 'working', '하위 에이전트 시작');
-    case 'PreToolUse': return state('agent.status', 'working', `${tool} 실행 중`);
-    case 'PostToolUse': return state('agent.status', 'thinking', `${tool} 결과 수신`);
-    case 'PostToolUseFailure': return state('agent.status', 'error', `${tool} 실행 실패`);
+    case 'PreToolUse': return { ...state('agent.status', 'working', `${tool} 실행 중`), toolPhase: 'started' };
+    case 'PostToolUse': return { ...state('agent.status', 'thinking', `${tool} 결과 수신`), toolPhase: 'completed' };
+    case 'PostToolUseFailure': return { ...state('agent.status', 'error', `${tool} 실행 실패`), toolPhase: 'failed' };
     case 'PermissionRequest': return state('approval.requested', 'approval', `${tool} 승인 요청`);
     case 'Notification':
       if (payload.notification_type === 'permission_prompt') return state('approval.requested', 'approval', '도구 승인 요청');

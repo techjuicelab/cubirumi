@@ -1,5 +1,10 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
+import { mkdtemp, mkdir, writeFile, rm, realpath } from 'node:fs/promises';
+import { tmpdir } from 'node:os';
+import { join } from 'node:path';
+import { collectClaudeEvents } from '../scripts/claude-observer.mjs';
+import { updateAgentState } from '../src/office-state.ts';
 import { connectedAgents, connectionSnapshot, cctvCandidates, cctvRooms, modelActivity, UNKNOWN_MODEL } from '../src/observation.ts';
 import { UNKNOWN_PROJECT, UNKNOWN_SESSION } from '../src/office-state.ts';
 
@@ -147,4 +152,50 @@ test('departures remove present counts but retain observed history, and bridge l
   assert.equal(connectionSnapshot([departed, ended], false).stale, true);
   assert.deepEqual(modelActivity([], []), []);
   assert.deepEqual(modelActivity([], [event({ type: 'user.instruction', model: 'unused', modelEvidence: 'reported' })]), []);
+});
+
+test('unidentified historical turns never borrow the current model across or without a proven time boundary', () => {
+  const boundary = '2026-10-14T01:00:00.000Z';
+  const roster = [agent('worker', { source: 'claude', model: 'current-model', modelEvidence: 'reported', taskStartedAt: boundary })];
+  const observed = fields => event({ source: 'claude', timestamp: '2026-10-14T00:59:59.000Z', ...fields });
+  const rows = modelActivity(roster, [observed({}), observed({ type: 'agent.completed' }),
+    observed({ model: 'historical-model', modelEvidence: 'reported' }), observed({ timestamp: boundary }),
+    observed({ timestamp: 'unconfirmed-time' })]);
+  assert.equal(rows.find(row => row.model === 'current-model').toolStarts, 1);
+  assert.equal(rows.find(row => row.model === 'historical-model').toolStarts, 1);
+  assert.equal(rows.find(row => row.key === UNKNOWN_MODEL).toolStarts, 2);
+  assert.equal(rows.find(row => row.key === UNKNOWN_MODEL).responsesEnded, 1);
+  const unbounded = modelActivity([agent('worker', { model: 'current-model', modelEvidence: 'reported' })], [event()]);
+  assert.equal(unbounded.find(row => row.key === UNKNOWN_MODEL).toolStarts, 1, 'missing turn identity and boundary is not model proof');
+});
+
+test('explicit tool phases override legacy labels while old hook and log starts remain compatible', () => {
+  const rows = modelActivity([], [
+    event({ toolPhase: 'started', title: 'localized tool metadata' }),
+    event({ toolPhase: 'completed', title: 'Read 실행 중' }),
+    event({ toolPhase: 'failed', title: 'Read 실행 중' }),
+    event({ toolPhase: 'running', title: 'Read 실행 중' }),
+    event({ title: 'Read 실행 중' }), event({ title: 'Read 실행 기록', observation: 'claude-log' }),
+    event({ title: '다른 도구 실행 중' }), event({ title: 'Read 결과 수신' }),
+  ]);
+  assert.equal(rows[0].toolStarts, 3);
+  assert.equal(rows[0].observedEvents, 3);
+});
+
+test('real Claude transcript tool starts reach model activity and follow-up results are not counted twice', async t => {
+  const directory = await realpath(await mkdtemp(join(tmpdir(), 'office-observation-contract-')));
+  t.after(() => rm(directory, { recursive: true, force: true }));
+  const project = join(directory, 'project'); await mkdir(project);
+  const now = Date.now(), sessionId = 'observation-contract';
+  const record = (type, offset, content) => ({ type, sessionId, uuid: `record-${offset}`,
+    timestamp: new Date(now + offset).toISOString(), message: { model: 'claude-tool-model', content } });
+  await writeFile(join(project, `${sessionId}.jsonl`), [
+    record('assistant', -2, [{ type: 'tool_use', id: 'tool-read', name: 'Read', input: { file_path: '/example/file.txt' } }]),
+    record('user', -1, [{ type: 'tool_result', tool_use_id: 'tool-read', content: 'fixture result' }]),
+  ].map(record => JSON.stringify(record)).join('\n') + '\n');
+  const events = await collectClaudeEvents({ agents: [] }, { projectsDir: directory, now, startedAt: now - 1000 });
+  const agents = []; for (const incoming of events) updateAgentState(agents, incoming);
+  const rows = modelActivity(agents, events);
+  assert.equal(rows.find(row => row.model === 'claude-tool-model').toolStarts, 1);
+  assert.equal(rows.find(row => row.model === 'claude-tool-model').observedEvents, 1);
 });

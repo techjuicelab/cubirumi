@@ -1103,7 +1103,8 @@ window.addEventListener('resize', () => { if (!disposed) measureSceneInsets(); }
 }
 document.addEventListener('visibilitychange', () => {
   communicationTime();
-  if (!document.hidden && !disposed) { queueRender(); void refreshUsage(); }
+  if (document.hidden) clearHydrationRetry();
+  else if (!disposed) { queueRender(); void refreshUsage(); resumeHydration(); }
 });
 el('session-select').addEventListener('change', () => pickRoom(selectedProject, el<HTMLSelectElement>('session-select').value));
 el('project-select').addEventListener('change', () => pickRoom(el<HTMLSelectElement>('project-select').value));
@@ -1166,8 +1167,12 @@ document.addEventListener('keydown', event => {
   else if (event.key.toLowerCase() === 'c' && !panel && !event.repeat) { event.preventDefault(); setWatch(!watch); }
 });
 
+function validOfficeEvent(entry: OfficeEvent) {
+  return !!entry && typeof entry.id === 'string' && !!entry.id && typeof entry.agentId === 'string' && !!entry.agentId
+    && typeof entry.title === 'string' && !!entry.title && ['codex', 'claude', 'manual'].includes(entry.source);
+}
 function ingest(entry: OfficeEvent, animate = true) {
-  if (!entry.id || !entry.agentId || !entry.title || !['codex', 'claude', 'manual'].includes(entry.source) || seen.has(entry.id)) return;
+  if (!validOfficeEvent(entry) || seen.has(entry.id)) return;
   seen.add(entry.id); if (seen.size > 5000) seen.delete(seen.values().next().value!);
   // The wall router blinks for each accepted event; the scene limits the rate and skips it with reduced motion.
   scene?.pulseRouter?.();
@@ -1186,35 +1191,72 @@ function ingest(entry: OfficeEvent, animate = true) {
 }
 const stream = new EventSource('/api/events');
 const pending: OfficeEvent[] = [];
+// A failed snapshot may already have shown its buffered SSE events. Reapply their state after recovery without duplicating history.
+const hydrationReplay: OfficeEvent[] = [];
 let hasConnected = false;
 let hydrationRunning = false;
+let hydrationRequired = true;
+let hydrationGeneration = 0;
+let hydrationRetryDelay = 1000;
+let hydrationRetryTimer: ReturnType<typeof setTimeout> | undefined;
+let hydrationController: AbortController | undefined;
+function clearHydrationRetry() {
+  if (hydrationRetryTimer !== undefined) clearTimeout(hydrationRetryTimer);
+  hydrationRetryTimer = undefined;
+}
+function resumeHydration() {
+  if (disposed || document.hidden || !bridgeConnected || !hydrationRequired || hydrationRunning) return;
+  clearHydrationRetry();
+  void hydrate();
+}
+function scheduleHydrationRetry() {
+  if (disposed || document.hidden || !bridgeConnected || !hydrationRequired || hydrationRetryTimer !== undefined) return;
+  hydrationRetryTimer = setTimeout(() => { hydrationRetryTimer = undefined; resumeHydration(); }, hydrationRetryDelay);
+  hydrationRetryDelay = Math.min(30000, hydrationRetryDelay * 2);
+}
 stream.onopen = () => {
+  if (disposed) return;
   const reconnecting = hasConnected;
   hasConnected = true;
   bridgeObserved = true;
   bridgeConnected = true;
   renderConnection(); queueRender();
   // SSE replay is bounded. Refresh lifecycle snapshots after a gap so departed workers cannot linger.
-  if ((reconnecting || !stateAvailable) && !hydrationRunning) void hydrate();
+  if (reconnecting) hydrationGeneration++;
+  if (reconnecting || !stateAvailable) hydrationRequired = true;
+  resumeHydration();
 };
 stream.onerror = () => {
+  if (disposed) return;
+  clearHydrationRetry();
   if (bridgeConnected) disconnectedAt = new Date(Date.now()).toISOString();
   bridgeObserved = true; bridgeConnected = false; renderConnection(); queueRender();
 };
 stream.onmessage = event => {
-  try { const entry = JSON.parse(event.data) as OfficeEvent; if (!stateLoaded) { pending.push(entry); if (pending.length > 1000) pending.shift(); } else ingest(entry); }
+  if (disposed) return;
+  try {
+    const entry = JSON.parse(event.data) as OfficeEvent;
+    if (!validOfficeEvent(entry)) return;
+    if (hydrationRequired) { hydrationReplay.push(entry); if (hydrationReplay.length > 1000) hydrationReplay.shift(); }
+    if (!stateLoaded) { pending.push(entry); if (pending.length > 1000) pending.shift(); } else ingest(entry);
+  }
   catch { toast('읽을 수 없는 작업 소식을 건너뛰었어요.'); }
 };
 async function hydrate() {
-  if (hydrationRunning) return;
+  if (disposed || hydrationRunning) return;
+  clearHydrationRetry();
   hydrationRunning = true;
   stateLoaded = false;
+  const generation = hydrationGeneration;
+  let succeeded = false;
   const controller = new AbortController();
+  hydrationController = controller;
   const timeout = setTimeout(() => controller.abort(), 6000);
   try {
     const response = await fetch('/api/state', { signal: controller.signal });
     if (!response.ok) throw new Error('state unavailable');
     const state = await response.json() as { agents?: OfficeEvent[]; events?: OfficeEvent[] };
+    if (disposed) return;
     agents = [companyOwner()];
     for (const snapshot of state.agents ?? []) if (snapshot.source !== 'demo') updateAgentState(agents, snapshot);
     for (const event of state.events ?? []) {
@@ -1223,15 +1265,25 @@ async function hydrate() {
       seen.add(event.id); events.push(event);
     }
     if (!state.agents) for (const event of events) updateAgentState(agents, event);
+    for (const entry of hydrationReplay) updateAgentState(agents, entry);
     events = events.sort((a, b) => Date.parse(b.timestamp) - Date.parse(a.timestamp)).slice(0, 500);
     stateAvailable = true;
+    succeeded = true;
   } catch { /* Current SSE events remain available when saved state cannot be loaded. */ }
-  finally { clearTimeout(timeout); }
+  finally { clearTimeout(timeout); hydrationController = undefined; }
+  if (disposed) return;
   stateLoaded = true;
   hydrationRunning = false;
+  // A reconnect during the request needs a later snapshot even when that older request succeeded.
+  hydrationRequired = !succeeded || generation !== hydrationGeneration;
+  if (succeeded) {
+    hydrationRetryDelay = 1000;
+    if (!hydrationRequired) hydrationReplay.length = 0;
+  }
   for (const entry of pending.splice(0)) ingest(entry, false);
   renderAll(); renderConnection();
   if (!hasShownBuilding && cameraScope === 'building' && staff().length) beginBuildingOverview();
+  scheduleHydrationRetry();
 }
 function syncCompanyForm() {
   el<HTMLInputElement>('company-name').value = companySettings.companyName;
@@ -1289,5 +1341,9 @@ el('company-form').addEventListener('submit', async event => {
 });
 applySettings(); setWatch(watch); renderAll(); renderConnection(); void hydrate(); void hydrateCompany(); void refreshUsage(); tick();
 const clockTimer = setInterval(tick, 1000);
-window.addEventListener('pagehide', () => { disposed = true; motionPreference.removeEventListener('change', onMotionPreferenceChange); stream.close(); handoffs.clear(); clearInterval(clockTimer); clearTimeout(toastTimer); scene?.dispose(); });
+window.addEventListener('pagehide', () => {
+  disposed = true; clearHydrationRetry(); hydrationController?.abort(); pending.length = 0; hydrationReplay.length = 0;
+  motionPreference.removeEventListener('change', onMotionPreferenceChange); stream.close(); handoffs.clear();
+  clearInterval(clockTimer); clearTimeout(toastTimer); scene?.dispose();
+});
 window.addEventListener('pageshow', event => { if (event.persisted) location.reload(); });

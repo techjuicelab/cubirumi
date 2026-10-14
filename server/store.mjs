@@ -5,7 +5,7 @@ import {
 } from 'node:fs';
 import { join, resolve } from 'node:path';
 import { randomUUID } from 'node:crypto';
-import { nextActivityKind } from '../integrations/claude-plugin/scripts/activity-kind.mjs';
+import { nextActivityKind, nextToolName } from '../integrations/claude-plugin/scripts/activity-kind.mjs';
 
 const JOURNAL_LIMIT = 5000;
 const JOURNAL_COMPACTION_BATCH = 256;
@@ -92,6 +92,8 @@ export function createEventStore({ dataDir, initialEvents = [], normalize }) {
           agent.status = 'idle';
           agent.lastEventAt = event.timestamp;
           delete agent.activityKind;
+          delete agent.toolName;
+          delete agent.toolPhase;
         }
       }
     }
@@ -111,16 +113,15 @@ export function createEventStore({ dataDir, initialEvents = [], normalize }) {
     if (event.modelEvidence === 'reported' && event.modelObservedAt === undefined
       && (newTask || event.model !== previous?.model)) delete record.modelObservedAt;
     const previousSessionObservation = previous?.sessionObservation ?? previous?.observation ?? 'manual';
-    const sessionObservation = event.observation ?? 'manual';
-    if (event.sessionId) {
-      if (previous?.sessionId && SESSION_AUTHORITY[previousSessionObservation] > SESSION_AUTHORITY[sessionObservation]) {
-        record.sessionId = previous.sessionId;
-        if (previous.sessionName) record.sessionName = previous.sessionName;
-        else delete record.sessionName;
-        record.sessionObservation = previousSessionObservation;
-      } else {
-        record.sessionObservation = sessionObservation;
-      }
+    const sessionObservation = event.sessionObservation ?? event.observation ?? 'manual';
+    if (previous?.sessionId && SESSION_AUTHORITY[previousSessionObservation] > SESSION_AUTHORITY[sessionObservation]) {
+      record.sessionId = previous.sessionId;
+      if (previous.sessionName !== undefined) record.sessionName = previous.sessionName;
+      else delete record.sessionName;
+      record.sessionObservation = previousSessionObservation;
+    } else if (event.sessionId) {
+      if (event.sessionId !== previous?.sessionId && event.sessionName === undefined) delete record.sessionName;
+      record.sessionObservation = sessionObservation;
     }
     record.retired = previous?.retired ?? false;
     record.sessionEnded = previous?.sessionEnded ?? false;
@@ -136,6 +137,13 @@ export function createEventStore({ dataDir, initialEvents = [], normalize }) {
       record.sessionEnded = false;
     } else if (event.type === 'approval.resolved') record.status = event.status ?? 'idle';
     record.status ??= 'idle';
+    const toolName = nextToolName(newTask ? undefined : previous?.toolName, event, record.status);
+    if (toolName === undefined) { delete record.toolName; delete record.toolPhase; }
+    else {
+      record.toolName = toolName;
+      // Retained tools are current state; a historical start must not be replayed as a new start.
+      record.toolPhase = 'running';
+    }
     const activityKind = nextActivityKind(newTask ? undefined : previous?.activityKind, event, record.status);
     if (activityKind === undefined) delete record.activityKind;
     else record.activityKind = activityKind;
@@ -193,12 +201,16 @@ export function createEventStore({ dataDir, initialEvents = [], normalize }) {
             : normalize({ ...candidate, timestamp: candidate.taskStartedAt }).timestamp;
           const lastEventAt = candidate.lastEventAt === undefined ? clean.timestamp
             : normalize({ ...candidate, timestamp: candidate.lastEventAt }).timestamp;
-          snapshot.agents.push({ ...clean, lastEventAt,
+          const record = { ...clean, lastEventAt,
             retired: candidate.retired === true, sessionEnded: candidate.sessionEnded === true,
             ...(taskStartedAt === undefined ? {} : { taskStartedAt }),
             ...(Object.hasOwn(SESSION_AUTHORITY, candidate.sessionObservation)
               ? { sessionObservation: candidate.sessionObservation } : {}),
-          });
+          };
+          const toolName = nextToolName(undefined, record, record.status ?? 'idle');
+          if (toolName === undefined) { delete record.toolName; delete record.toolPhase; }
+          else { record.toolName = toolName; record.toolPhase = 'running'; }
+          snapshot.agents.push(record);
         }
       } catch {
         snapshot = undefined;

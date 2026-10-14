@@ -2,7 +2,7 @@ import AppKit
 import WebKit
 
 @MainActor
-final class OfficeApp: NSObject, NSApplicationDelegate, WKNavigationDelegate, WKUIDelegate {
+final class OfficeApp: NSObject, NSApplicationDelegate, WKNavigationDelegate, WKUIDelegate, NSWindowDelegate {
     private let officeURL = URL(string: "http://127.0.0.1:4780/?desktop=1")!
     private var window: NSWindow!
     private var webView: WKWebView!
@@ -14,7 +14,19 @@ final class OfficeApp: NSObject, NSApplicationDelegate, WKNavigationDelegate, WK
     private var connectionTask: Task<Void, Never>?
     private var terminationPending = false
     private var runtimeFailure = false
+    private var observationWindows: [ObjectIdentifier: (window: NSWindow, webView: WKWebView)] = [:]
+    private var observationRetries: [ObjectIdentifier: Timer] = [:]
+    private let showWindow: @MainActor (NSWindow) -> Void
     private let productName = Bundle.main.object(forInfoDictionaryKey: "CFBundleDisplayName") as? String ?? "Agent Office"
+
+    init(showWindow: @escaping @MainActor (NSWindow) -> Void = { $0.makeKeyAndOrderFront(nil) }) {
+        self.showWindow = showWindow
+        super.init()
+    }
+
+    static func configureWebView(_ configuration: WKWebViewConfiguration) {
+        configuration.preferences.isElementFullscreenEnabled = true
+    }
 
     func applicationDidFinishLaunching(_ notification: Notification) {
         NSApp.setActivationPolicy(.regular)
@@ -31,6 +43,7 @@ final class OfficeApp: NSObject, NSApplicationDelegate, WKNavigationDelegate, WK
         window.setFrameAutosaveName("AgentOfficeWindow")
         let configuration = WKWebViewConfiguration()
         configuration.websiteDataStore = .default()
+        Self.configureWebView(configuration)
         webView = WKWebView(frame: window.contentView!.bounds, configuration: configuration)
         webView.autoresizingMask = [.width, .height]
         webView.navigationDelegate = self
@@ -50,7 +63,7 @@ final class OfficeApp: NSObject, NSApplicationDelegate, WKNavigationDelegate, WK
         ])
         buildMenu()
         applyPin(UserDefaults.standard.bool(forKey: "AlwaysOnTop"))
-        window.makeKeyAndOrderFront(nil)
+        showWindow(window)
         NSApp.activate(ignoringOtherApps: true)
         runtime.onStateChange = { [weak self] state in
             guard let self, !self.terminationPending else { return }
@@ -112,17 +125,25 @@ final class OfficeApp: NSObject, NSApplicationDelegate, WKNavigationDelegate, WK
     }
 
     private func applyPin(_ enabled: Bool) {
-        window.level = enabled ? .floating : .normal
-        window.collectionBehavior = enabled ? [.canJoinAllSpaces, .fullScreenAuxiliary] : [.managed, .fullScreenPrimary]
+        for target in [window!] + observationWindows.values.map(\.window) {
+            target.level = enabled ? .floating : .normal
+            target.collectionBehavior = enabled ? [.canJoinAllSpaces, .fullScreenAuxiliary] : [.managed, .fullScreenPrimary]
+        }
         pinItem.state = enabled ? .on : .off
     }
     @objc private func togglePin() {
         let enabled = window.level != .floating
         UserDefaults.standard.set(enabled, forKey: "AlwaysOnTop"); applyPin(enabled)
     }
-    @objc private func reloadOffice() { loadOffice() }
+    private var activeWebView: WKWebView? {
+        observationWindows.values.first(where: { $0.window === NSApp.keyWindow })?.webView ?? webView
+    }
+    @objc private func reloadOffice() {
+        if let active = activeWebView, active !== webView { active.reload() }
+        else { loadOffice() }
+    }
     @objc private func buildingCctv() {
-        webView.evaluateJavaScript("document.querySelector('[data-building-cctv]')?.click()", completionHandler: nil)
+        activeWebView?.evaluateJavaScript("document.querySelector('[data-building-cctv]')?.click()", completionHandler: nil)
     }
     private func loadOffice() {
         guard !terminationPending, !runtimeFailure else { return }
@@ -166,16 +187,69 @@ final class OfficeApp: NSObject, NSApplicationDelegate, WKNavigationDelegate, WK
         decisionHandler(.allow)
     }
     func webView(_ webView: WKWebView, createWebViewWith configuration: WKWebViewConfiguration, for navigationAction: WKNavigationAction, windowFeatures: WKWindowFeatures) -> WKWebView? {
-        if let url = navigationAction.request.url, isOffice(url) { window.makeKeyAndOrderFront(nil) }
-        else { openUsageLink(navigationAction) }
-        return nil
+        guard !terminationPending, !runtimeFailure, let url = navigationAction.request.url, isOffice(url) else {
+            openUsageLink(navigationAction)
+            return nil
+        }
+        Self.configureWebView(configuration)
+        let width = min(2400, max(480, windowFeatures.width?.doubleValue ?? 960))
+        let height = min(1800, max(420, windowFeatures.height?.doubleValue ?? 720))
+        let observation = NSWindow(contentRect: NSRect(x: 0, y: 0, width: width, height: height),
+                                   styleMask: [.titled, .closable, .miniaturizable, .resizable], backing: .buffered, defer: false)
+        observation.title = "\(productName) · 관찰"
+        observation.minSize = NSSize(width: 480, height: 420)
+        observation.isReleasedWhenClosed = false
+        observation.delegate = self
+        observation.center()
+        let enabled = UserDefaults.standard.bool(forKey: "AlwaysOnTop")
+        observation.level = enabled ? .floating : .normal
+        observation.collectionBehavior = enabled ? [.canJoinAllSpaces, .fullScreenAuxiliary] : [.managed, .fullScreenPrimary]
+        let childView = WKWebView(frame: NSRect(x: 0, y: 0, width: width, height: height), configuration: configuration)
+        childView.autoresizingMask = [.width, .height]
+        childView.navigationDelegate = self
+        childView.uiDelegate = self
+        observation.contentView = childView
+        observationWindows[ObjectIdentifier(observation)] = (observation, childView)
+        showWindow(observation)
+        // WebKit owns the pending navigation and must receive this exact new view.
+        return childView
     }
-    func webView(_ webView: WKWebView, didFinish navigation: WKNavigation!) { status.isHidden = true }
-    func webView(_ webView: WKWebView, didFailProvisionalNavigation navigation: WKNavigation!, withError error: Error) { retryConnection() }
-    func webView(_ webView: WKWebView, didFail navigation: WKNavigation!, withError error: Error) { retryConnection() }
-    func webViewWebContentProcessDidTerminate(_ webView: WKWebView) { retryConnection() }
+    func webViewDidClose(_ webView: WKWebView) {
+        observationWindows.values.first(where: { $0.webView === webView })?.window.close()
+    }
+    func windowWillClose(_ notification: Notification) {
+        guard let closing = notification.object as? NSWindow,
+              let removed = observationWindows.removeValue(forKey: ObjectIdentifier(closing)) else { return }
+        observationRetries.removeValue(forKey: ObjectIdentifier(removed.webView))?.invalidate()
+        removed.webView.stopLoading()
+        removed.webView.navigationDelegate = nil
+        removed.webView.uiDelegate = nil
+    }
+    private func retryWebView(_ webView: WKWebView) {
+        if webView === self.webView { retryConnection(); return }
+        let key = ObjectIdentifier(webView)
+        guard !terminationPending, !runtimeFailure,
+              observationWindows.values.contains(where: { $0.webView === webView }) else { return }
+        observationRetries.removeValue(forKey: key)?.invalidate()
+        observationRetries[key] = Timer.scheduledTimer(withTimeInterval: 3, repeats: false) { [weak self, weak webView] _ in
+            MainActor.assumeIsolated {
+                guard let self, let webView else { return }
+                self.observationRetries.removeValue(forKey: key)
+                guard !self.terminationPending, !self.runtimeFailure,
+                      self.observationWindows.values.contains(where: { $0.webView === webView }) else { return }
+                webView.load(URLRequest(url: self.officeURL, cachePolicy: .reloadIgnoringLocalCacheData))
+            }
+        }
+    }
+    func webView(_ webView: WKWebView, didFinish navigation: WKNavigation!) {
+        if webView === self.webView { status.isHidden = true }
+        observationRetries.removeValue(forKey: ObjectIdentifier(webView))?.invalidate()
+    }
+    func webView(_ webView: WKWebView, didFailProvisionalNavigation navigation: WKNavigation!, withError error: Error) { retryWebView(webView) }
+    func webView(_ webView: WKWebView, didFail navigation: WKNavigation!, withError error: Error) { retryWebView(webView) }
+    func webViewWebContentProcessDidTerminate(_ webView: WKWebView) { retryWebView(webView) }
     func applicationShouldHandleReopen(_ sender: NSApplication, hasVisibleWindows flag: Bool) -> Bool {
-        window.makeKeyAndOrderFront(nil); return true
+        showWindow(window); return true
     }
     func applicationShouldTerminate(_ sender: NSApplication) -> NSApplication.TerminateReply {
         guard runtime.isBundled else { return .terminateNow }
@@ -184,6 +258,9 @@ final class OfficeApp: NSObject, NSApplicationDelegate, WKNavigationDelegate, WK
         retryTimer?.invalidate()
         connectionTask?.cancel()
         webView.stopLoading()
+        for timer in observationRetries.values { timer.invalidate() }
+        observationRetries.removeAll()
+        for observation in observationWindows.values { observation.webView.stopLoading() }
         status.stringValue = "사무실을 닫고 있어요…"
         status.isHidden = false
         runtime.shutdown { [weak self] stopped in
@@ -200,6 +277,8 @@ final class OfficeApp: NSObject, NSApplicationDelegate, WKNavigationDelegate, WK
     func applicationWillTerminate(_ notification: Notification) {
         retryTimer?.invalidate()
         connectionTask?.cancel()
+        for timer in observationRetries.values { timer.invalidate() }
+        observationRetries.removeAll()
     }
 }
 

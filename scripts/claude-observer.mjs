@@ -48,7 +48,6 @@ async function discoverFiles(projectsDir, previous, cutoff, budget) {
   for (const entry of previous.values()) if (typeof entry.sessionId === 'string') sessions.set(entry.sessionId, true);
   const sessionDirectories = [];
   async function candidate(path, sessionId, rawAgentId = null) {
-    if (files.length >= 512) return;
     const info = await plainInfo(path);
     if (!info || (!previous.has(employeeId(sessionId, rawAgentId)) && info.mtimeMs < cutoff)) return;
     files.push({ path, sessionId, rawAgentId, modifiedAt: info.mtimeMs });
@@ -78,7 +77,9 @@ async function discoverFiles(projectsDir, previous, cutoff, budget) {
       if (flow.isDirectory()) await children(join(subagents, 'workflows', flow.name), session.sessionId);
     }
   }
-  return files.sort((a, b) => b.modifiedAt - a.modifiedAt);
+  // Choose the inventory after considering the bounded directory scan, so old known entries cannot
+  // occupy all 512 slots before a newly created conversation is even considered.
+  return files.sort((a, b) => b.modifiedAt - a.modifiedAt).slice(0, 512);
 }
 
 function ownRecord(record, file) {
@@ -96,7 +97,7 @@ function actionForRecord(record, file, info, cutoff, now, pendingTools) {
   const message = record.message && typeof record.message === 'object' ? record.message : {};
   const content = Array.isArray(message.content) ? message.content.filter(item => item && typeof item === 'object') : [];
   let type = 'agent.status', status = 'idle', title;
-  let toolName, activityKind, reclassifiedFrom, inputRecorded = false;
+  let toolName, toolPhase, activityKind, reclassifiedFrom, inputRecorded = false;
   const kindOf = tools => {
     const kinds = new Set(tools.map(tool => tool.activityKind));
     return kinds.size === 1 ? [...kinds][0] : 'general';
@@ -123,6 +124,7 @@ function actionForRecord(record, file, info, cutoff, now, pendingTools) {
       const failed = completed.filter(tool => tool.failed);
       const remaining = [...pendingTools.values()];
       status = failed.length ? 'error' : remaining.length ? 'working' : 'thinking';
+      toolPhase = failed.length ? 'failed' : remaining.length ? 'running' : 'completed';
       title = failed.length ? '도구 실행 실패' : remaining.length ? '다른 도구 실행 중' : '도구 결과 수신';
       const observed = failed.length ? failed : remaining.length ? remaining : completed;
       activityKind = kindOf(observed);
@@ -142,7 +144,7 @@ function actionForRecord(record, file, info, cutoff, now, pendingTools) {
         if (typeof tools[index].id === 'string') pendingTools.set(tools[index].id, observed[index]);
         if (pendingTools.size > 128) pendingTools.delete(pendingTools.keys().next().value);
       }
-      status = 'working'; toolName = observed[0].toolName; activityKind = kindOf(observed); title = `${toolName} 실행 기록`;
+      status = 'working'; toolPhase = 'started'; toolName = observed[0].toolName; activityKind = kindOf(observed); title = `${toolName} 실행 기록`;
     }
     else if (['end_turn', 'stop_sequence', 'max_tokens', 'refusal'].includes(message.stop_reason)
       && !content.every(item => item.type === 'thinking' || item.type === 'redacted_thinking')) {
@@ -154,6 +156,7 @@ function actionForRecord(record, file, info, cutoff, now, pendingTools) {
   if (inputRecorded) action.inputRecorded = true;
   if (reclassifiedFrom) action.reclassifiedFrom = reclassifiedFrom;
   if (toolName) action.toolName = toolName;
+  if (toolPhase) action.toolPhase = toolPhase;
   if (activityKind) action.activityKind = activityKind;
   if (record.type === 'assistant' && typeof message.model === 'string' && MODEL.test(message.model)) {
     action.model = message.model; action.modelEvidence = 'reported'; action.modelObservedAt = action.timestamp;
@@ -191,6 +194,7 @@ async function readActions(file, budget, cutoff, now) {
         const communication = (suffix, title, toolName) => {
           const { status, inputRecorded, reclassifiedFrom, ...metadata } = action;
           delete metadata.toolName;
+          delete metadata.toolPhase;
           delete metadata.activityKind;
           actions.push({ ...metadata, type: 'message.sent', title, recordKey: `${action.recordKey}:${suffix}`,
             ...(toolName ? { toolName } : {}) });
