@@ -1,5 +1,6 @@
 import { colors, initialAgents, sourceNames, type Agent, type OfficeEvent } from './protocol.ts';
 import { nextActivityKind, nextToolName } from '../integrations/claude-plugin/scripts/activity-kind.mjs';
+import { msg } from './i18n.ts';
 
 export const UNKNOWN_PROJECT = '__unreported_project__';
 export const UNKNOWN_SESSION = '__unreported_session__';
@@ -13,7 +14,7 @@ export function modelColor(model: string | undefined): string {
   return colors[hash % colors.length]!;
 }
 export function owner(): Agent {
-  return { ...initialAgents(false)[0]!, source: 'manual', task: '우리 회사의 프로젝트와 작업을 살펴보는 중' };
+  return { ...initialAgents(false)[0]!, source: 'manual', task: msg('Watching the company’s projects and work', '우리 회사의 프로젝트와 작업을 살펴보는 중') };
 }
 export function updateAgentState(agents: Agent[], event: OfficeEvent): Agent | undefined {
   // Registry snapshots already identify their provider; only incoming owner events need target resolution.
@@ -55,8 +56,8 @@ export function updateAgentState(agents: Agent[], event: OfficeEvent): Agent | u
     }
   }
   if (!agent) {
-    agent = { id: event.agentId, name: event.agentName ?? `직원 ${event.agentId.slice(-6)}`,
-      role: event.role ?? (event.parentAgentId ? '하위 에이전트' : sourceNames[event.source]),
+    agent = { id: event.agentId, name: event.agentName ?? msg('Staff {id}', '직원 {id}', { id: event.agentId.slice(-6) }),
+      role: event.role ?? (event.parentAgentId ? msg('Subagent', '하위 에이전트') : sourceNames[event.source]),
       source: event.source, color: modelColor(undefined), status: 'idle', task: event.title,
       modelEvidence: 'unknown', retired: false };
     agents.push(agent);

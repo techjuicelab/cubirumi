@@ -4,6 +4,7 @@ import { foldedPaperPlane, paperPlaneCurve, paperPlaneMessageCurve, paperPlaneSc
 import type { ActivityKind, AgentStatus } from './protocol.ts';
 import { appearanceFor } from './appearance.ts';
 import { STATUS_STYLE, UNCONFIRMED_STYLE } from './status-style.ts';
+import { getLanguage, msg } from './i18n.ts';
 
 export type BuildingEmployee = { id: string; status: string; color?: string; name?: string; activityKind?: ActivityKind; showCharacter?: boolean; unconfirmedStatus?: AgentStatus };
 /** Exact observed head counts for one project. Unconfirmed records are separate from known idle, waiting or done. */
@@ -120,8 +121,15 @@ const WINDOW_COLORS: Record<WindowState, THREE.Color> = {
   unconfirmed: new THREE.Color(UNCONFIRMED_STYLE.color), dark: new THREE.Color('#aebfcb'),
 };
 const WINDOW_ORDER = ['working', 'approval', 'error', 'quiet', 'unconfirmed'] as const;
-const COUNT_LABELS: Record<keyof BuildingFloorCounts, string> = { working: '작업', approval: '확인 요청', error: '오류', quiet: '대기', unconfirmed: '미확인' };
-const SPOKEN_LABELS: Record<keyof BuildingFloorCounts, string> = { working: '작업 중', approval: '확인 요청', error: '오류', quiet: '대기', unconfirmed: UNCONFIRMED_STYLE.label };
+const COUNT_LABELS: Record<keyof BuildingFloorCounts, string> = {
+  get working() { return msg('Working', '작업'); }, get approval() { return msg('Approval', '확인 요청'); },
+  get error() { return msg('Error', '오류'); }, get quiet() { return msg('Idle', '대기'); }, get unconfirmed() { return msg('Unknown', '미확인'); },
+};
+const SPOKEN_LABELS: Record<keyof BuildingFloorCounts, string> = {
+  get working() { return STATUS_STYLE.working.label; }, get approval() { return STATUS_STYLE.approval.label; },
+  get error() { return STATUS_STYLE.error.label; }, get quiet() { return msg('Idle', '대기'); },
+  get unconfirmed() { return UNCONFIRMED_STYLE.label; },
+};
 export const WINDOW_CELLS = 12;
 const WINDOW_COLUMNS = 6;
 
@@ -233,7 +241,7 @@ export function floorKeyStep(key: string): -1 | 0 | 1 {
 /** Nameplate numbers: only non-zero states, in window order; '활동 없음' when nobody is connected. */
 export function floorSummary(counts: BuildingFloorCounts): string {
   const parts = WINDOW_ORDER.filter(key => clampCount(counts[key]) > 0).map(key => `${COUNT_LABELS[key]} ${clampCount(counts[key])}`);
-  return parts.length ? parts.join(' · ') : '활동 없음';
+  return parts.length ? parts.join(' · ') : msg('No activity', '활동 없음');
 }
 /** Rough rendered width of plate text in CSS px: Hangul and other wide glyphs take about one em, Latin letters and digits about .62. */
 function plateTextWidth(text: string, size: number): number {
@@ -254,8 +262,8 @@ export function nameplateWidths(number: string, name: string, counts: string): {
   };
 }
 function spokenSummary(counts: BuildingFloorCounts): string {
-  const parts = WINDOW_ORDER.filter(key => clampCount(counts[key]) > 0).map(key => `${SPOKEN_LABELS[key]} ${clampCount(counts[key])}명`);
-  return parts.length ? parts.join(', ') : '활동 없음';
+  const parts = WINDOW_ORDER.filter(key => clampCount(counts[key]) > 0).map(key => msg('{label}: {count}', '{label} {count}명', { label: SPOKEN_LABELS[key], count: clampCount(counts[key]) }));
+  return parts.length ? parts.join(', ') : msg('No activity', '활동 없음');
 }
 
 /**
@@ -472,7 +480,7 @@ export class BuildingOverview {
   constructor(container: HTMLElement, onFloor: (id: string) => void, onFocus?: (projectId: string | null) => void) {
     this.container = container; this.onFloor = onFloor; this.onFocus = onFocus;
     const rail = this.rail = document.createElement('ol');
-    rail.className = 'building-floor-rail'; rail.setAttribute('reversed', ''); rail.setAttribute('aria-label', '층 목록'); rail.hidden = true;
+    rail.className = 'building-floor-rail'; rail.setAttribute('reversed', ''); rail.setAttribute('aria-label', msg('Floors', '층 목록')); rail.hidden = true;
     rail.addEventListener('keydown', event => {
       const step = floorKeyStep(event.key) || (event.key === 'ArrowUp' ? 1 : event.key === 'ArrowDown' ? -1 : 0);
       if (!step) return;
@@ -1050,8 +1058,8 @@ export class BuildingOverview {
       const focused = String(floor.id === this.focusId);
       if (floor.label.dataset.focused !== focused) floor.label.dataset.focused = focused;
       // The plate names what its click does: pick the floor first, open the office once it is the focus floor.
-      const action = floor.id === this.focusId ? '사무실 보기' : '층 선택';
-      const aria = `${i + 1}층 ${floor.name} ${action} · ${spokenSummary(floor.counts)}`;
+      const action = floor.id === this.focusId ? msg('Open office', '사무실 보기') : msg('Select floor', '층 선택');
+      const aria = `${msg('Floor {number}', '{number}층', { number: i + 1 })} ${floor.name} ${action} · ${spokenSummary(floor.counts)}`;
       if (floor.label.getAttribute('aria-label') !== aria) floor.label.setAttribute('aria-label', aria);
     }
     this.paintShellFocus();
@@ -1146,6 +1154,7 @@ export class BuildingOverview {
    * detailed floors with exact counts, compressed floors with only their approval and error marks.
    */
   private syncRail() {
+    this.rail.setAttribute('aria-label', msg('Floors', '층 목록'));
     const active = this.order.length >= RAIL_MIN_FLOORS;
     const live = new Set(active ? this.order.map(floor => floor.id) : []);
     for (const [id, entry] of this.railItems) if (!live.has(id)) { entry.item.remove(); this.railItems.delete(id); }
@@ -1155,7 +1164,7 @@ export class BuildingOverview {
     for (let i = 0; i < this.order.length; i++) {
       const floor = this.order[i]!, focused = floor.id === this.focusId;
       const entry = this.railItems.get(floor.id) ?? this.createRailItem(floor.id);
-      const key = JSON.stringify([i, floor.name, floor.counts, floor.detailed, focused, floor.id === tabStop]);
+      const key = JSON.stringify([getLanguage(), i, floor.name, floor.counts, floor.detailed, focused, floor.id === tabStop]);
       if (entry.key === key) continue;
       entry.key = key;
       entry.button.setAttribute('tabindex', floor.id === tabStop ? '0' : '-1');
@@ -1164,7 +1173,7 @@ export class BuildingOverview {
       entry.counts.textContent = floor.detailed ? floorSummary(floor.counts) : ''; entry.counts.hidden = !floor.detailed;
       entry.approval.textContent = String(floor.counts.approval); entry.approval.hidden = !floor.counts.approval;
       entry.error.textContent = String(floor.counts.error); entry.error.hidden = !floor.counts.error;
-      entry.button.setAttribute('aria-label', `${i + 1}층 ${floor.name}${focused ? ' · 선택한 층' : ''} · ${spokenSummary(floor.counts)}`);
+      entry.button.setAttribute('aria-label', `${msg('Floor {number}', '{number}층', { number: i + 1 })} ${floor.name}${focused ? msg(' · Selected floor', ' · 선택한 층') : ''} · ${spokenSummary(floor.counts)}`);
       if (focused) entry.button.setAttribute('aria-current', 'true'); else entry.button.removeAttribute('aria-current');
     }
     const items = Array.from(this.rail.children), count = this.order.length;

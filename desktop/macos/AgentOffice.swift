@@ -2,7 +2,16 @@ import AppKit
 import WebKit
 
 @MainActor
-final class OfficeApp: NSObject, NSApplicationDelegate, WKNavigationDelegate, WKUIDelegate, NSWindowDelegate {
+private final class OfficeLanguageHandler: NSObject, WKScriptMessageHandler {
+    weak var app: OfficeApp?
+    init(app: OfficeApp) { self.app = app }
+    func userContentController(_ userContentController: WKUserContentController, didReceive message: WKScriptMessage) {
+        app?.userContentController(userContentController, didReceive: message)
+    }
+}
+
+@MainActor
+final class OfficeApp: NSObject, NSApplicationDelegate, WKNavigationDelegate, WKUIDelegate, NSWindowDelegate, WKScriptMessageHandler {
     private let officeURL = URL(string: "http://127.0.0.1:4780/?desktop=1")!
     private var window: NSWindow!
     private var webView: WKWebView!
@@ -10,7 +19,10 @@ final class OfficeApp: NSObject, NSApplicationDelegate, WKNavigationDelegate, WK
     private var pinItem: NSMenuItem!
     private var status: NSTextField!
     private let runtime = BundledRuntime()
-    private let updater = OfficeUpdater()
+    private let updater: OfficeUpdater
+    private let localization: OfficeLocalization
+    private let defaults: UserDefaults
+    private var statusMessage: OfficeMessage = .connecting
     private var connectionTask: Task<Void, Never>?
     private var terminationPending = false
     private var runtimeFailure = false
@@ -19,7 +31,11 @@ final class OfficeApp: NSObject, NSApplicationDelegate, WKNavigationDelegate, WK
     private let showWindow: @MainActor (NSWindow) -> Void
     private let productName = Bundle.main.object(forInfoDictionaryKey: "CFBundleDisplayName") as? String ?? "Agent Office"
 
-    init(showWindow: @escaping @MainActor (NSWindow) -> Void = { $0.makeKeyAndOrderFront(nil) }) {
+    init(defaults: UserDefaults = .standard, showWindow: @escaping @MainActor (NSWindow) -> Void = { $0.makeKeyAndOrderFront(nil) }) {
+        self.defaults = defaults
+        let localization = OfficeLocalization(defaults: defaults)
+        self.localization = localization
+        self.updater = OfficeUpdater(localization: localization)
         self.showWindow = showWindow
         super.init()
     }
@@ -44,13 +60,14 @@ final class OfficeApp: NSObject, NSApplicationDelegate, WKNavigationDelegate, WK
         let configuration = WKWebViewConfiguration()
         configuration.websiteDataStore = .default()
         Self.configureWebView(configuration)
+        configureLanguageBridge(configuration)
         webView = WKWebView(frame: window.contentView!.bounds, configuration: configuration)
         webView.autoresizingMask = [.width, .height]
         webView.navigationDelegate = self
         webView.uiDelegate = self
         webView.allowsBackForwardNavigationGestures = false
         window.contentView!.addSubview(webView)
-        status = NSTextField(wrappingLabelWithString: "로컬 사무실에 연결하고 있어요…")
+        status = NSTextField(wrappingLabelWithString: localization.text(.connecting))
         status.alignment = .center
         status.font = .systemFont(ofSize: 14)
         status.textColor = .secondaryLabelColor
@@ -62,7 +79,7 @@ final class OfficeApp: NSObject, NSApplicationDelegate, WKNavigationDelegate, WK
             status.widthAnchor.constraint(lessThanOrEqualTo: window.contentView!.widthAnchor, constant: -60)
         ])
         buildMenu()
-        applyPin(UserDefaults.standard.bool(forKey: "AlwaysOnTop"))
+        applyPin(defaults.bool(forKey: "AlwaysOnTop"))
         showWindow(window)
         NSApp.activate(ignoringOtherApps: true)
         runtime.onStateChange = { [weak self] state in
@@ -74,7 +91,7 @@ final class OfficeApp: NSObject, NSApplicationDelegate, WKNavigationDelegate, WK
             case .starting:
                 self.runtimeFailure = false
                 self.webView.isHidden = true
-                self.status.stringValue = "사무실을 준비하고 있어요…"
+                self.setStatus(.preparing)
                 self.status.isHidden = false
             case .failed(let message):
                 self.runtimeFailure = true
@@ -82,7 +99,7 @@ final class OfficeApp: NSObject, NSApplicationDelegate, WKNavigationDelegate, WK
                 self.connectionTask?.cancel()
                 self.webView.stopLoading()
                 self.webView.isHidden = true
-                self.status.stringValue = message
+                self.setStatus(message)
                 self.status.isHidden = false
             }
         }
@@ -94,34 +111,101 @@ final class OfficeApp: NSObject, NSApplicationDelegate, WKNavigationDelegate, WK
         let menu = NSMenu()
         let appItem = NSMenuItem(); menu.addItem(appItem)
         let appMenu = NSMenu(); appItem.submenu = appMenu
-        appMenu.addItem(withTitle: "\(productName)에 관하여", action: #selector(NSApplication.orderFrontStandardAboutPanel(_:)), keyEquivalent: "")
+        appMenu.addItem(withTitle: localization.text("About \(productName)", "\(productName)에 관하여"), action: #selector(NSApplication.orderFrontStandardAboutPanel(_:)), keyEquivalent: "")
         appMenu.addItem(.separator())
         updater.appendMenuItems(to: appMenu)
         appMenu.addItem(.separator())
-        appMenu.addItem(withTitle: "\(productName) 가리기", action: #selector(NSApplication.hide(_:)), keyEquivalent: "h")
+        appMenu.addItem(withTitle: localization.text("Hide \(productName)", "\(productName) 가리기"), action: #selector(NSApplication.hide(_:)), keyEquivalent: "h")
         appMenu.addItem(.separator())
-        appMenu.addItem(withTitle: "\(productName) 종료", action: #selector(NSApplication.terminate(_:)), keyEquivalent: "q")
+        let languageItem = NSMenuItem(title: localization.text("Language", "언어"), action: nil, keyEquivalent: "")
+        let languageMenu = NSMenu(title: languageItem.title)
+        for language in OfficeLanguage.allCases {
+            let item = NSMenuItem(title: language == .en ? "English" : "한국어", action: #selector(selectLanguage(_:)), keyEquivalent: "")
+            item.representedObject = language.rawValue
+            item.target = self
+            item.state = localization.language == language ? .on : .off
+            languageMenu.addItem(item)
+        }
+        languageItem.submenu = languageMenu
+        appMenu.addItem(languageItem)
+        appMenu.addItem(.separator())
+        appMenu.addItem(withTitle: localization.text("Quit \(productName)", "\(productName) 종료"), action: #selector(NSApplication.terminate(_:)), keyEquivalent: "q")
         let editItem = NSMenuItem(); menu.addItem(editItem)
-        let editMenu = NSMenu(title: "편집"); editItem.submenu = editMenu
-        editMenu.addItem(withTitle: "실행 취소", action: NSSelectorFromString("undo:"), keyEquivalent: "z")
-        editMenu.addItem(withTitle: "다시 실행", action: NSSelectorFromString("redo:"), keyEquivalent: "z").keyEquivalentModifierMask = [.shift, .command]
+        let editMenu = NSMenu(title: localization.text("Edit", "편집")); editItem.submenu = editMenu
+        editMenu.addItem(withTitle: localization.text("Undo", "실행 취소"), action: NSSelectorFromString("undo:"), keyEquivalent: "z")
+        editMenu.addItem(withTitle: localization.text("Redo", "다시 실행"), action: NSSelectorFromString("redo:"), keyEquivalent: "z").keyEquivalentModifierMask = [.shift, .command]
         editMenu.addItem(.separator())
-        editMenu.addItem(withTitle: "잘라내기", action: NSSelectorFromString("cut:"), keyEquivalent: "x")
-        editMenu.addItem(withTitle: "복사", action: NSSelectorFromString("copy:"), keyEquivalent: "c")
-        editMenu.addItem(withTitle: "붙여넣기", action: NSSelectorFromString("paste:"), keyEquivalent: "v")
-        editMenu.addItem(withTitle: "모두 선택", action: NSSelectorFromString("selectAll:"), keyEquivalent: "a")
+        editMenu.addItem(withTitle: localization.text("Cut", "잘라내기"), action: NSSelectorFromString("cut:"), keyEquivalent: "x")
+        editMenu.addItem(withTitle: localization.text("Copy", "복사"), action: NSSelectorFromString("copy:"), keyEquivalent: "c")
+        editMenu.addItem(withTitle: localization.text("Paste", "붙여넣기"), action: NSSelectorFromString("paste:"), keyEquivalent: "v")
+        editMenu.addItem(withTitle: localization.text("Select All", "모두 선택"), action: NSSelectorFromString("selectAll:"), keyEquivalent: "a")
         let windowItem = NSMenuItem(); menu.addItem(windowItem)
-        let windowMenu = NSMenu(title: "창"); windowItem.submenu = windowMenu
-        pinItem = NSMenuItem(title: "항상 위에 표시", action: #selector(togglePin), keyEquivalent: "t")
-        pinItem.target = self; windowMenu.addItem(pinItem)
-        let reload = NSMenuItem(title: "사무실 새로고침", action: #selector(reloadOffice), keyEquivalent: "r")
+        let windowMenu = NSMenu(title: localization.text("Window", "창")); windowItem.submenu = windowMenu
+        pinItem = NSMenuItem(title: localization.text("Always on Top", "항상 위에 표시"), action: #selector(togglePin), keyEquivalent: "t")
+        pinItem.target = self; pinItem.state = window?.level == .floating ? .on : .off; windowMenu.addItem(pinItem)
+        let reload = NSMenuItem(title: localization.text("Reload Office", "사무실 새로고침"), action: #selector(reloadOffice), keyEquivalent: "r")
         reload.target = self; windowMenu.addItem(reload)
-        let cctv = NSMenuItem(title: "건물 전체 보기", action: #selector(buildingCctv), keyEquivalent: "0")
+        let cctv = NSMenuItem(title: localization.text("View Entire Building", "건물 전체 보기"), action: #selector(buildingCctv), keyEquivalent: "0")
         cctv.target = self; windowMenu.addItem(cctv)
         windowMenu.addItem(.separator())
-        windowMenu.addItem(withTitle: "최소화", action: #selector(NSWindow.performMiniaturize(_:)), keyEquivalent: "m")
-        windowMenu.addItem(withTitle: "전체 화면", action: #selector(NSWindow.toggleFullScreen(_:)), keyEquivalent: "f").keyEquivalentModifierMask = [.control, .command]
+        windowMenu.addItem(withTitle: localization.text("Minimize", "최소화"), action: #selector(NSWindow.performMiniaturize(_:)), keyEquivalent: "m")
+        windowMenu.addItem(withTitle: localization.text("Enter Full Screen", "전체 화면"), action: #selector(NSWindow.toggleFullScreen(_:)), keyEquivalent: "f").keyEquivalentModifierMask = [.control, .command]
         NSApp.mainMenu = menu; NSApp.windowsMenu = windowMenu
+    }
+
+    private var observationTitle: String {
+        "\(productName) · \(localization.text("Observation", "관찰"))"
+    }
+
+    private func setStatus(_ message: OfficeMessage) {
+        statusMessage = message
+        status?.stringValue = localization.text(message)
+    }
+
+    private func configureLanguageBridge(_ configuration: WKWebViewConfiguration) {
+        // A weak proxy avoids a web view -> message handler -> app ownership cycle.
+        configuration.userContentController.removeScriptMessageHandler(forName: "officeLanguage")
+        configuration.userContentController.add(OfficeLanguageHandler(app: self), name: "officeLanguage")
+        updateLanguageScript(configuration.userContentController)
+    }
+
+    private func updateLanguageScript(_ controller: WKUserContentController) {
+        let prefix = "window.cubirumiInitialLanguage = "
+        let retainedScripts = controller.userScripts.filter { !$0.source.hasPrefix(prefix) }
+        controller.removeAllUserScripts()
+        retainedScripts.forEach(controller.addUserScript)
+        controller.addUserScript(WKUserScript(source: "\(prefix)'\(localization.language.rawValue)';",
+                                               injectionTime: .atDocumentStart, forMainFrameOnly: true))
+    }
+
+    private func changeLanguage(_ language: OfficeLanguage) {
+        guard localization.setLanguage(language) else { return }
+        buildMenu()
+        status?.stringValue = localization.text(statusMessage)
+        for observation in observationWindows.values { observation.window.title = observationTitle }
+        // The value is restricted to the enum's two literals before entering JavaScript.
+        let script = "window.cubirumiSetLanguage?.('\(language.rawValue)')"
+        for view in [webView].compactMap({ $0 }) + observationWindows.values.map(\.webView) {
+            updateLanguageScript(view.configuration.userContentController)
+            view.evaluateJavaScript(script, completionHandler: nil)
+        }
+    }
+
+    @objc private func selectLanguage(_ sender: NSMenuItem) {
+        guard let raw = sender.representedObject as? String, let language = OfficeLanguage(rawValue: raw) else { return }
+        changeLanguage(language)
+    }
+
+    func userContentController(_ userContentController: WKUserContentController, didReceive message: WKScriptMessage) {
+        let origin = message.frameInfo.securityOrigin
+        guard message.name == "officeLanguage",
+              let raw = message.body as? String, let language = OfficeLanguage(rawValue: raw),
+              OfficeLanguage.acceptsOrigin(scheme: origin.protocol, host: origin.host, port: origin.port,
+                                           isMainFrame: message.frameInfo.isMainFrame),
+              let source = message.frameInfo.request.url, isOffice(source),
+              let sourceView = message.webView,
+              sourceView === webView || observationWindows.values.contains(where: { $0.webView === sourceView }) else { return }
+        changeLanguage(language)
     }
 
     private func applyPin(_ enabled: Bool) {
@@ -133,7 +217,7 @@ final class OfficeApp: NSObject, NSApplicationDelegate, WKNavigationDelegate, WK
     }
     @objc private func togglePin() {
         let enabled = window.level != .floating
-        UserDefaults.standard.set(enabled, forKey: "AlwaysOnTop"); applyPin(enabled)
+        defaults.set(enabled, forKey: "AlwaysOnTop"); applyPin(enabled)
     }
     private var activeWebView: WKWebView? {
         observationWindows.values.first(where: { $0.window === NSApp.keyWindow })?.webView ?? webView
@@ -148,7 +232,7 @@ final class OfficeApp: NSObject, NSApplicationDelegate, WKNavigationDelegate, WK
     private func loadOffice() {
         guard !terminationPending, !runtimeFailure else { return }
         retryTimer?.invalidate(); retryTimer = nil
-        status.stringValue = "로컬 사무실에 연결하고 있어요…"; status.isHidden = false
+        setStatus(.connecting); status.isHidden = false
         connectionTask?.cancel()
         connectionTask = Task { [weak self] in
             guard let self else { return }
@@ -161,7 +245,7 @@ final class OfficeApp: NSObject, NSApplicationDelegate, WKNavigationDelegate, WK
     }
     private func retryConnection() {
         guard !terminationPending, !runtimeFailure else { return }
-        status.stringValue = "사무실 서버를 기다리고 있어요.\n설치한 로컬 수신기가 실행되면 자동으로 연결됩니다."
+        setStatus(.waiting)
         status.isHidden = false
         retryTimer?.invalidate()
         retryTimer = Timer.scheduledTimer(withTimeInterval: 3, repeats: false) { [weak self] _ in
@@ -192,16 +276,17 @@ final class OfficeApp: NSObject, NSApplicationDelegate, WKNavigationDelegate, WK
             return nil
         }
         Self.configureWebView(configuration)
+        configureLanguageBridge(configuration)
         let width = min(2400, max(480, windowFeatures.width?.doubleValue ?? 960))
         let height = min(1800, max(420, windowFeatures.height?.doubleValue ?? 720))
         let observation = NSWindow(contentRect: NSRect(x: 0, y: 0, width: width, height: height),
                                    styleMask: [.titled, .closable, .miniaturizable, .resizable], backing: .buffered, defer: false)
-        observation.title = "\(productName) · 관찰"
+        observation.title = observationTitle
         observation.minSize = NSSize(width: 480, height: 420)
         observation.isReleasedWhenClosed = false
         observation.delegate = self
         observation.center()
-        let enabled = UserDefaults.standard.bool(forKey: "AlwaysOnTop")
+        let enabled = defaults.bool(forKey: "AlwaysOnTop")
         observation.level = enabled ? .floating : .normal
         observation.collectionBehavior = enabled ? [.canJoinAllSpaces, .fullScreenAuxiliary] : [.managed, .fullScreenPrimary]
         let childView = WKWebView(frame: NSRect(x: 0, y: 0, width: width, height: height), configuration: configuration)
@@ -261,14 +346,14 @@ final class OfficeApp: NSObject, NSApplicationDelegate, WKNavigationDelegate, WK
         for timer in observationRetries.values { timer.invalidate() }
         observationRetries.removeAll()
         for observation in observationWindows.values { observation.webView.stopLoading() }
-        status.stringValue = "사무실을 닫고 있어요…"
+        setStatus(.closing)
         status.isHidden = false
         runtime.shutdown { [weak self] stopped in
             guard let self else { return }
             if !stopped {
                 self.terminationPending = false
                 self.runtimeFailure = true
-                self.status.stringValue = "사무실 서버가 아직 종료되지 않았어요. 잠시 후 앱 종료를 다시 시도해 주세요."
+                self.setStatus(.shutdownFailed)
             }
             sender.reply(toApplicationShouldTerminate: stopped)
         }

@@ -14,7 +14,7 @@ Cubirumi is a local, open-source 3D office for observing Codex and Claude Code a
 
 macOS 13.5+ · Apple Silicon / Intel · MIT license
 
-The app interface and detailed documentation are currently in Korean.
+The app opens in English. Choose **Settings → Language → English / 한국어** to switch the interface immediately. Your choice is saved on this device; the macOS menus follow the same language. Company names, project names, and activity records keep their original text. Detailed documentation is currently in Korean.
 
 <p align="center">
   <img src="design/previews/office-team.png" alt="An actual Claude Code session with three agents working at their desks, with model names and activity labels above them." width="720">

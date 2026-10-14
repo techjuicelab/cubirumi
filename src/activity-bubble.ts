@@ -1,16 +1,15 @@
 import { activityNames, type ActivityKind } from './protocol.ts';
 import { isActivityKind } from '../integrations/claude-plugin/scripts/activity-kind.mjs';
-import { STATUS_STYLE, EXTERNAL_CALL_LABEL, EXTERNAL_TOOL_NAME } from './status-style.ts';
+import { STATUS_STYLE, externalCallLabel, EXTERNAL_TOOL_NAME } from './status-style.ts';
 import { isWorkingStatus } from './work-activity.ts';
+import { msg } from './i18n.ts';
 export type ObservedActivity = { status: string; task?: string; toolName?: string; activityKind?: ActivityKind };
 export type ActivityMessage = { text: string; compactText: string; fullText: string };
 export const ACTIVITY_BUBBLE_HEIGHT = 32;
 
 // Quiet statuses have no balloon text; every other caption comes from the shared status table.
-const STATUS_TEXT: Record<string, string> = {
-  working: STATUS_STYLE.working.label, thinking: STATUS_STYLE.thinking.label, reviewing: STATUS_STYLE.reviewing.label,
-  approval: STATUS_STYLE.approval.label, done: STATUS_STYLE.done.label, error: STATUS_STYLE.error.label,
-};
+const statusText = (status: string): string =>
+  Object.hasOwn(STATUS_STYLE, status) ? STATUS_STYLE[status as keyof typeof STATUS_STYLE].label : '';
 const segments = new Intl.Segmenter('ko', { granularity: 'grapheme' });
 
 function clean(value: unknown): string {
@@ -26,20 +25,20 @@ function shorten(value: string, limit: number): string {
 export function activityMessage(activity: ObservedActivity): ActivityMessage {
   if (activity.status === 'idle' || activity.status === 'waiting') return { text: '', compactText: '', fullText: '' };
   let fullText = '';
-  if (activity.status === 'done') fullText = STATUS_TEXT.done!;
+  if (activity.status === 'done') fullText = statusText('done');
   // Same rule as isExternalCall: a working-family status on the external tool is a phone call, whatever the activity kind.
-  else if (isWorkingStatus(activity.status) && activity.toolName === EXTERNAL_TOOL_NAME) fullText = EXTERNAL_CALL_LABEL;
+  else if (isWorkingStatus(activity.status) && activity.toolName === EXTERNAL_TOOL_NAME) fullText = externalCallLabel();
   else if (isActivityKind(activity.activityKind)) {
     const label = activityNames[activity.activityKind];
     fullText = activity.status === 'approval' ? `${label} · ${STATUS_STYLE.approval.label}`
       : activity.status === 'error' ? `${label} · ${STATUS_STYLE.error.label}`
-        : `${label} 중`;
+        : msg('{label} in progress', '{label} 중', { label });
   }
   else {
     fullText = clean(activity.task);
     const tool = clean(activity.toolName);
-    if (!fullText && activity.status === 'working' && tool) fullText = `${tool} 사용 중`;
-    if (!fullText) fullText = STATUS_TEXT[activity.status] ?? '';
+    if (!fullText && activity.status === 'working' && tool) fullText = msg('Using {tool}', '{tool} 사용 중', { tool });
+    if (!fullText) fullText = statusText(activity.status);
   }
   fullText = shorten(fullText, 160);
   return { fullText, text: shorten(fullText, 28), compactText: shorten(fullText, 18) };

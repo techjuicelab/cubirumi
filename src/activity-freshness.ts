@@ -1,6 +1,7 @@
 import type { Agent } from './protocol.ts';
 import { projectKey } from './office-state.ts';
 import { hasVisibleActivity } from './observation.ts';
+import { msg } from './i18n.ts';
 
 export const ACTIVITY_FRESHNESS_MS = 5 * 60 * 1000;
 
@@ -51,7 +52,7 @@ export function splitDormantFloors(staff: readonly Agent[], now: number, dormant
   }
   if (!rested.size) return { staff: [...staff], dormant: [] };
   const hidden = new Set([...rested].map(floor => floor.id));
-  const dormant = [...rested].sort((a, b) => b.latest - a.latest).map(floor => ({ id: floor.id, name: floor.name ?? '프로젝트 미확인',
+  const dormant = [...rested].sort((a, b) => b.latest - a.latest).map(floor => ({ id: floor.id, name: floor.name ?? msg('Unknown project', '프로젝트 미확인'),
     ...(Number.isFinite(floor.latest) ? { lastEventAt: new Date(floor.latest).toISOString() } : {}) }));
   return { staff: staff.filter(agent => !hidden.has(projectKey(agent))), dormant };
 }

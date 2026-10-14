@@ -1,4 +1,7 @@
+import { normalizeLanguage, type Language } from './i18n.ts';
+
 export interface ViewSettings {
+  language: Language;
   labels: boolean;
   bubbles: boolean;
   autoRotate: boolean;
@@ -17,11 +20,12 @@ export const VIEW_SETTINGS_KEY = 'agent-office.view.v1';
 export const DORMANT_FLOOR_MINUTES = [0, 30, 60, 180, 360, 720, 1440, 4320, 10080];
 export const MAX_FLOOR_CHOICES = [0, 4, 6, 8, 10, 12];
 export function defaultViewSettings(reducedMotion = false): ViewSettings {
-  return { labels: true, bubbles: true, autoRotate: true, followWork: true, cycle: true, cycleSeconds: 25, powerSaving: true, dormantFloorMinutes: 60, maxFloors: 8, reducedMotion, reducedMotionOverride: null };
+  return { language: 'en', labels: true, bubbles: true, autoRotate: true, followWork: true, cycle: true, cycleSeconds: 25, powerSaving: true, dormantFloorMinutes: 60, maxFloors: 8, reducedMotion, reducedMotionOverride: null };
 }
 export function normalizeViewSettings(value: unknown, reducedMotion = false): ViewSettings {
   const result = defaultViewSettings(reducedMotion);
   if (!value || typeof value !== 'object') return result;
+  if ('language' in value) result.language = normalizeLanguage(value.language);
   for (const key of ['labels', 'bubbles', 'autoRotate', 'followWork', 'cycle', 'powerSaving'] as const) {
     if (key in value && typeof (value as ViewSettings)[key] === 'boolean') result[key] = (value as ViewSettings)[key];
   }

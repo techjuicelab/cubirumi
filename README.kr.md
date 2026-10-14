@@ -14,7 +14,7 @@ Cubirumi는 Codex와 Claude Code의 작업을 귀여운 미니어처 3D 사무�
 
 macOS 13.5 이상 · Apple Silicon / Intel · MIT 오픈소스
 
-앱 화면과 상세 안내 문서는 현재 한국어입니다. 기본 README는 영어로, 이 문서는 한국어로 제공합니다.
+앱의 기본 언어는 영어입니다. **Settings → Language → 한국어**에서 한국어로 바꿀 수 있고, **설정 → 언어 → English**에서 영어로 돌아갈 수 있습니다. 선택은 이 기기에 저장되며 macOS 메뉴에도 바로 반영됩니다. 회사명·프로젝트명·기록의 원문은 유지됩니다. 기본 README는 영어로, 이 문서는 한국어로 제공합니다.
 
 <p align="center">
   <img src="design/previews/office-team.png" alt="Claude Code 직원 세 명이 각자의 책상에서 일하며 모델 이름과 업무 상태를 표시하는 실제 사용 화면" width="720">

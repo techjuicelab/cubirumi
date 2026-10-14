@@ -1,3 +1,5 @@
+import { setLanguage } from '../src/i18n.ts';
+setLanguage('ko');
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import { activityMessage, activityBubbleWidth, placeActivityBubbles, ACTIVITY_BUBBLE_HEIGHT } from '../src/activity-bubble.ts';

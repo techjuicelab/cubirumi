@@ -6,12 +6,14 @@ import Sparkle
 @MainActor
 final class OfficeUpdater: NSObject, NSMenuItemValidation {
     private let bundle: Bundle
+    private let localization: OfficeLocalization
 #if canImport(Sparkle)
     private var controller: SPUStandardUpdaterController?
 #endif
 
-    init(bundle: Bundle = .main) {
+    init(bundle: Bundle = .main, localization: OfficeLocalization? = nil) {
         self.bundle = bundle
+        self.localization = localization ?? OfficeLocalization()
         super.init()
     }
 
@@ -39,12 +41,12 @@ final class OfficeUpdater: NSObject, NSMenuItemValidation {
     }
 
     func appendMenuItems(to menu: NSMenu) {
-        let check = NSMenuItem(title: "업데이트 확인…", action: #selector(checkForUpdates), keyEquivalent: "")
-        let automaticChecks = NSMenuItem(title: "자동으로 업데이트 확인", action: #selector(toggleAutomaticChecks), keyEquivalent: "")
-        let automaticDownloads = NSMenuItem(title: "업데이트 자동 다운로드 및 종료 시 설치", action: #selector(toggleAutomaticDownloads), keyEquivalent: "")
+        let check = NSMenuItem(title: localization.text("Check for Updates…", "업데이트 확인…"), action: #selector(checkForUpdates), keyEquivalent: "")
+        let automaticChecks = NSMenuItem(title: localization.text("Automatically Check for Updates", "자동으로 업데이트 확인"), action: #selector(toggleAutomaticChecks), keyEquivalent: "")
+        let automaticDownloads = NSMenuItem(title: localization.text("Download Updates and Install on Quit", "업데이트 자동 다운로드 및 종료 시 설치"), action: #selector(toggleAutomaticDownloads), keyEquivalent: "")
         for item in [check, automaticChecks, automaticDownloads] {
             item.target = self
-            item.toolTip = Self.configurationIsValid(bundle) ? nil : "이 빌드에는 자동 업데이트 연결이 설정되어 있지 않습니다."
+            item.toolTip = Self.configurationIsValid(bundle) ? nil : localization.text("Automatic updates are not configured for this build.", "이 빌드에는 자동 업데이트 연결이 설정되어 있지 않습니다.")
             menu.addItem(item)
         }
     }

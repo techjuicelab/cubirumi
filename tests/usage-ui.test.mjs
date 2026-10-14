@@ -1,3 +1,5 @@
+import { setLanguage } from '../src/i18n.ts';
+setLanguage('ko');
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import { Window } from 'happy-dom';
@@ -52,7 +54,7 @@ test('expired quotas stay historical in detail, missing windows stay unknown, an
 });
 
 test('each card targets its accessible provider section, and the Claude official link is fixed while received labels are escaped', t => {
-  const providers = data({ updatedAt: new Date(now).toISOString(), windows: [{ ...windows[0], label: '<img src=x onerror=alert(1)>' }] });
+  const providers = data({ updatedAt: new Date(now).toISOString(), windows: [{ ...windows[0], id: 'custom-window', label: '<img src=x onerror=alert(1)>' }] });
   const document = mount(t, renderEnergyCards(providers, { now }) + renderUsageDetails(providers, { now }));
   for (const provider of ['codex', 'claude']) {
     const card = document.querySelector(`[data-usage-provider="${provider}"]`);

@@ -1,3 +1,5 @@
+import { setLanguage } from '../src/i18n.ts';
+setLanguage('ko');
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import { modelColor, owner, pageAgents, projectKey, sessionKey, updateAgentState, summarizeOfficeActivity, UNKNOWN_PROJECT, UNKNOWN_SESSION } from '../src/office-state.ts';

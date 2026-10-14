@@ -1,4 +1,6 @@
-import test from 'node:test';
+import test, { beforeEach } from 'node:test';
+import { setLanguage } from './i18n.ts';
+beforeEach(() => setLanguage('ko'));
 import assert from 'node:assert/strict';
 import { companyNameFromSettings, DEFAULT_COMPANY_NAME, DEFAULT_OWNER_NAME, loadCompanyName, renderCompanyName,
   normalizeCompanySettings, loadCompanySettings, saveCompanySettings, renderCompanySettings } from './company-settings.ts';
@@ -87,4 +89,18 @@ test('owner and company displays are independent and use textContent for untrust
   assert.equal(ownerTitle.textContent, `${name} 사장님`);
   assert.equal(companyOwner.textContent, `${name} 사장님`);
   assert.equal(home.attributes['aria-label'], '예시 회사 홈');
+});
+
+
+test('English company labels keep names intact and validation follows the selected language', async () => {
+  setLanguage('en');
+  const company = { textContent: '' }, owner = { textContent: '' }, title = { textContent: '' }, home = { setAttribute(key, value) { this[key] = value; } };
+  const selectors = { '[data-company-name]': [company], '[data-company-owner]': [title], '[data-company-home]': [home], '[data-owner-name]': [owner], '[data-owner-title], [data-company-owner]': [title] };
+  renderCompanySettings({ querySelectorAll: selector => selectors[selector] }, { companyName: '한글 회사', ownerName: '한글 이름' });
+  assert.equal(company.textContent, '한글 회사');
+  assert.equal(owner.textContent, '한글 이름');
+  assert.equal(title.textContent, '한글 이름, owner');
+  assert.equal(home['aria-label'], '한글 회사 home');
+  await assert.rejects(saveCompanySettings({ ownerName: '' }), /Owner name must contain/);
+  await assert.rejects(saveCompanySettings({ ownerName: 'Valid' }, async () => ({ ok: false })), /previous names are preserved/);
 });

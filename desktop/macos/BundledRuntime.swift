@@ -15,7 +15,7 @@ final class BundledRuntime {
         case external
         case starting
         case ready
-        case failed(String)
+        case failed(OfficeMessage)
     }
 
     private let nodeURL: URL
@@ -51,7 +51,7 @@ final class BundledRuntime {
         guard startupTask == nil, process == nil, !stopping else { return }
         guard resourcesPresent else { onStateChange?(.external); return }
         guard !bundleIncomplete, FileManager.default.isExecutableFile(atPath: nodeURL.path) else {
-            onStateChange?(.failed("앱의 실행 파일이 완전하지 않아요. Agent Office를 다시 내려받아 설치해 주세요."))
+            onStateChange?(.failed(.incompleteBundle))
             return
         }
         onStateChange?(.starting)
@@ -60,7 +60,7 @@ final class BundledRuntime {
             // An existing listener belongs to another launch. Never adopt or stop it.
             if await self.healthResponse() != nil {
                 guard !Task.isCancelled, !self.stopping else { return }
-                self.onStateChange?(.failed(self.conflictMessage))
+                self.onStateChange?(.failed(.portConflict))
                 return
             }
             guard !Task.isCancelled, !self.stopping else { return }
@@ -72,7 +72,7 @@ final class BundledRuntime {
                     if self.matches(health) {
                         self.onStateChange?(.ready)
                     } else {
-                        self.onStateChange?(.failed(self.conflictMessage))
+                        self.onStateChange?(.failed(.portConflict))
                         self.shutdown { _ in }
                     }
                     return
@@ -80,13 +80,9 @@ final class BundledRuntime {
                 do { try await Task.sleep(nanoseconds: 200_000_000) } catch { return }
             }
             guard !Task.isCancelled, !self.stopping else { return }
-            self.onStateChange?(.failed("사무실 서버를 시작하지 못했어요. 앱을 종료한 뒤 다시 열어 주세요."))
+            self.onStateChange?(.failed(.startupFailed))
             self.shutdown { _ in }
         }
-    }
-
-    private var conflictMessage: String {
-        "다른 로컬 서버가 4780 포트를 사용하고 있어요.\n기존 Agent Office 자동 실행이나 터미널 서버를 확인한 뒤 이 앱을 다시 열어 주세요."
     }
 
     private func launch() {
@@ -122,7 +118,7 @@ final class BundledRuntime {
                 guard let self, self.process === terminated else { return }
                 self.input = nil
                 if !self.stopping {
-                    self.onStateChange?(.failed("사무실 서버가 종료되었어요. 앱을 종료한 뒤 다시 열어 주세요."))
+                    self.onStateChange?(.failed(.serverStopped))
                 }
             }
         }
@@ -135,7 +131,7 @@ final class BundledRuntime {
         catch {
             process = nil
             input = nil
-            onStateChange?(.failed("앱에 포함된 사무실 서버를 실행하지 못했어요. 설치 파일과 macOS 지원 버전을 확인해 주세요."))
+            onStateChange?(.failed(.launchFailed))
         }
     }
 

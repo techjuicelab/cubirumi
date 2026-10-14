@@ -1,24 +1,32 @@
 import './style.css';
-import { normalizeCompanySettings, loadCompanySettings, saveCompanySettings, renderCompanySettings, type CompanySettings } from './company-settings';
+import { normalizeCompanySettings, loadCompanySettings, saveCompanySettings, renderCompanySettings, companySettingsErrorMessage, type CompanySettings } from './company-settings';
 import { OfficeScene } from './office-scene';
 import { sourceNames, observationNames, activityNames, type Agent, type OfficeEvent } from './protocol';
-import { statusStyleFor, presentedStatusStyle, isExternalCall, UNCONFIRMED_STYLE, EXTERNAL_CALL_LABEL } from './status-style';
+import { statusStyleFor, presentedStatusStyle, isExternalCall, UNCONFIRMED_STYLE, externalCallLabel } from './status-style';
 import { isWorkingStatus } from './work-activity';
 import { portraitSVG, statusShapeSVG } from './portrait';
 import { owner, projectKey, sessionKey, updateAgentState, isWorkingAgent } from './office-state';
 import { connectedAgents, cctvRooms, modelActivity, hasVisibleActivity } from './observation';
 import { presentAgentActivity, splitDormantFloors } from './activity-freshness';
-import { defaultViewSettings, readViewSettings, saveViewSettings } from './view-settings';
-import { shell, icon } from './shell';
+import { defaultViewSettings, readViewSettings, saveViewSettings, VIEW_SETTINGS_KEY } from './view-settings';
+import { renderShell, localizeShell, icon } from './shell';
+import { msg, locale, setLanguage, normalizeLanguage, type Language } from './i18n';
 import { CameraDirector } from './camera-director';
 import { BuildingDirector } from './building-director';
+import { eventTitle, agentTask } from './event-label';
 import { HandoffPlayback, communicationEndpoints } from './handoff-playback';
 import { unavailableUsage, parseUsage, type ProviderUsage } from './usage-view';
 import { renderEnergyCards, renderUsageDetails, usageSectionId } from './usage-ui';
 
+type OfficeWindow = Window & {
+  cubirumiInitialLanguage?: Language;
+  cubirumiSetLanguage?: (language: unknown) => void;
+  webkit?: { messageHandlers?: { officeLanguage?: { postMessage: (language: Language) => void } } };
+};
+
 const el = <T extends HTMLElement = HTMLElement>(id: string) => document.getElementById(id) as T;
 const escape = (text: string) => text.replace(/[&<>"']/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]!));
-const time = (value: string) => { const date = new Date(value); return Number.isFinite(date.getTime()) ? date.toLocaleTimeString('ko-KR', { hour: '2-digit', minute: '2-digit', hour12: false }) : '시간 미확인'; };
+const time = (value: string) => { const date = new Date(value); return Number.isFinite(date.getTime()) ? date.toLocaleTimeString(locale(), { hour: '2-digit', minute: '2-digit', hour12: false }) : msg("Time unknown", "시간 미확인"); };
 const pad2 = (value: number) => String(value).padStart(2, '0');
 const absoluteTime = (value: string) => {
   const date = new Date(value);
@@ -27,13 +35,37 @@ const absoluteTime = (value: string) => {
 // Cards speak in relative time; only a lost connection shows the actual clock time it was last observed.
 const relativeTime = (value: string, now = Date.now()) => {
   const at = Date.parse(value);
-  if (!Number.isFinite(at)) return '시간 미확인';
+  if (!Number.isFinite(at)) return msg("Time unknown", "시간 미확인");
   const minutes = Math.floor(Math.max(0, now - at) / 60_000);
-  return minutes < 1 ? '방금' : minutes < 60 ? `${minutes}분 전` : minutes < 1440 ? `${Math.floor(minutes / 60)}시간 전` : `${Math.floor(minutes / 1440)}일 전`;
+  return minutes < 1 ? msg("Just now", "방금") : minutes < 60 ? msg("{count} min ago", "{count}분 전", { count: minutes }) : minutes < 1440 ? msg("{count} hr ago", "{count}시간 전", { count: Math.floor(minutes / 60) }) : msg("{count} d ago", "{count}일 전", { count: Math.floor(minutes / 1440) });
 };
 const statusLabel = (agent: Agent) => presentedStatusStyle(agent).label;
-const modelName = (agent: Agent) => agent.modelEvidence === 'reported' && agent.model ? agent.model : '모델 미확인';
-document.querySelector<HTMLDivElement>('#app')!.innerHTML = shell;
+const displayedToolName = (agent: Agent): string => {
+  const reported = agent.toolName ?? '';
+  if ((agent.source === 'codex' || agent.source === 'claude') && ['hook', 'codex-log', 'claude-log'].includes(agent.observation ?? '')) {
+    if (reported === 'MCP 도구') return msg('MCP tool', 'MCP 도구');
+    if (reported === '도구') return msg('Tool', '도구');
+  }
+  return reported;
+};
+const modelName = (agent: Agent) => agent.modelEvidence === 'reported' && agent.model ? agent.model : msg("Model unknown", "모델 미확인");
+const motionPreference = matchMedia('(prefers-reduced-motion: reduce)');
+let settings = defaultViewSettings(motionPreference.matches);
+try { settings = readViewSettings(localStorage, motionPreference.matches); } catch { /* Storage can be blocked by the browser. */ }
+// The native app can supply the same preference when browser storage is unavailable.
+try {
+  const saved = localStorage.getItem(VIEW_SETTINGS_KEY);
+  if (!saved || !Object.hasOwn(JSON.parse(saved), 'language')) {
+    const initial = (window as OfficeWindow).cubirumiInitialLanguage;
+    if (initial === 'en' || initial === 'ko') settings.language = initial;
+  }
+} catch {
+  const initial = (window as OfficeWindow).cubirumiInitialLanguage;
+  if (initial === 'en' || initial === 'ko') settings.language = initial;
+}
+setLanguage(settings.language);
+document.documentElement.lang = settings.language;
+document.querySelector<HTMLDivElement>('#app')!.innerHTML = renderShell();
 // Fullscreen renders only descendants of its element, including dialogs and status messages.
 el('game').append(el('office-panel'), el('toast'));
 
@@ -99,6 +131,10 @@ let lastCameraKey = '';
 let renderPending = false;
 let renderedFreshness = '';
 let disposed = false;
+let toastMessage: (() => string) | undefined;
+let companyStatusMessage: (() => string) | undefined;
+let settingsSavedState: boolean | undefined;
+let directorCaption: () => string = () => '';
 let toastTimer: ReturnType<typeof setTimeout>;
 /** Scene methods from the 3D branch contract. Every call is optional so the UI runs with any scene build. */
 type SceneContract = {
@@ -125,15 +161,15 @@ let sheetDragEndedAt = -Infinity;
 // The two queries are kept apart because some DOM implementations do not evaluate comma-separated lists.
 const narrowSheetQuery = matchMedia('(max-width:650px)'), shortSheetQuery = matchMedia('(max-height:560px)');
 const sheetLayout = { get matches() { return narrowSheetQuery.matches || shortSheetQuery.matches; } };
-const motionPreference = matchMedia('(prefers-reduced-motion: reduce)');
-let settings = defaultViewSettings(motionPreference.matches);
-try { settings = readViewSettings(localStorage, motionPreference.matches); } catch { /* Storage can be blocked by the browser. */ }
 try { scene = new OfficeScene(el('scene'), selectAgent, id => pickRoom(id)); }
 catch (error) {
-  el('scene').innerHTML = '<div class="webgl-error"><strong>3D 화면을 열지 못했어요</strong><p>브라우저의 그래픽 가속을 켜고 새로고침해주세요.<br>직원과 소통 기록은 아래 메뉴에서 볼 수 있어요.</p></div>';
+  renderWebGLError();
   console.error('3D 초기화 실패', error);
 }
 scene?.setOwnerNames?.({ companyName: companySettings.companyName, ownerName: companySettings.ownerName });
+function renderWebGLError() {
+  el('scene').innerHTML = `<div class="webgl-error"><strong>${msg("Could not open the 3D view", "3D 화면을 열지 못했어요")}</strong><p>${msg("Enable graphics acceleration in your browser and reload.<br>Use the menu below to see team members and records.", "브라우저의 그래픽 가속을 켜고 새로고침해주세요.<br>직원과 소통 기록은 아래 메뉴에서 볼 수 있어요.")}</p></div>`;
+}
 function placeToast() {
   const dialog = el<HTMLDialogElement>('office-panel');
   const target = dialog.open ? dialog : el('game');
@@ -250,8 +286,9 @@ function measureSceneInsets() {
   }
   scene.setHudInsets?.({ top, right, bottom, left, beside });
 }
-function toast(message: string) {
-  clearTimeout(toastTimer); measureDockClearance(); placeToast(); el('toast').hidden = false; el('toast').textContent = message;
+function toast(message: () => string) {
+  toastMessage = message;
+  clearTimeout(toastTimer); measureDockClearance(); placeToast(); el('toast').hidden = false; el('toast').textContent = message();
   toastTimer = setTimeout(() => { el('toast').hidden = true; }, 4500);
 }
 // Project observed records for the live view; time alone never writes a completion or changes the source state.
@@ -281,7 +318,7 @@ function floors() {
   const groups = new Map<string, { id: string; name: string; agents: Agent[] }>();
   for (const agent of staff()) {
     const id = projectKey(agent);
-    const group = groups.get(id) ?? { id, name: agent.projectName ?? '프로젝트 미확인', agents: [] };
+    const group = groups.get(id) ?? { id, name: agent.projectName ?? msg("Project unknown", "프로젝트 미확인"), agents: [] };
     group.agents.push(agent); groups.set(id, group);
   }
   return [...groups.values()].map(group => ({ ...group, counts: floorCounts(group.agents) }));
@@ -290,7 +327,7 @@ function rooms() {
   const groups = new Map<string, { id: string; name: string; agents: Agent[] }>();
   for (const agent of staff().filter(a => projectKey(a) === selectedProject)) {
     const id = sessionKey(agent);
-    const group = groups.get(id) ?? { id, name: agent.sessionName ?? (agent.sessionId ? `채팅 ${agent.sessionId.slice(0, 8)}` : '채팅 미확인'), agents: [] };
+    const group = groups.get(id) ?? { id, name: agent.sessionName ?? (agent.sessionId ? msg("Chat {id}", "채팅 {id}", { id: agent.sessionId.slice(0, 8) }) : msg("Chat unknown", "채팅 미확인")), agents: [] };
     group.agents.push(agent); groups.set(id, group);
   }
   return [...groups.values()];
@@ -312,14 +349,14 @@ function activitySummary(currentStaff: Agent[]) {
   const unconfirmed = currentStaff.filter(agent => agent.unconfirmedStatus).length;
   const quiet = currentStaff.length - working - attention - unconfirmed;
   // Decision 35: a zero count is left out, and nothing to report reads '활동 없음' like the floor plates and the owner card.
-  return [...(working ? [`${working}명 작업 중`] : []), ...(attention ? [`${attention}명 확인 필요`] : []), ...(quiet ? [`${quiet}명 대기`] : []), ...(unconfirmed ? [`${unconfirmed}명 상태 미확인`] : [])].join(' · ') || '활동 없음';
+  return [...(working ? [msg("{count} working", "{count}명 작업 중", { count: working })] : []), ...(attention ? [msg("{count} need attention", "{count}명 확인 필요", { count: attention })] : []), ...(quiet ? [msg("{count} waiting", "{count}명 대기", { count: quiet })] : []), ...(unconfirmed ? [msg("{count} status unknown", "{count}명 상태 미확인", { count: unconfirmed })] : [])].join(' · ') || msg("No activity", "활동 없음");
 }
 /** A person is drawn at their desk while their reported activity is visible or their card is open. */
 function drawsCharacter(agent: Agent) { return hasVisibleActivity(agent) || agent.id === selectedAgent; }
 function sceneStaff(currentStaff: Agent[]) {
   const now = communicationTime();
   return currentStaff.filter(agent => drawsCharacter(agent) || (communicationSeats.get(agent.id) ?? 0) > now)
-    .map(agent => ({ ...agent, showCharacter: drawsCharacter(agent) }));
+    .map(agent => ({ ...agent, task: agentTask(agent, events), showCharacter: drawsCharacter(agent) }));
 }
 function communicationTime() {
   const now = Date.now();
@@ -436,56 +473,56 @@ function renderNavigation() {
   const index = currentFloors.findIndex(floor => floor.id === selectedProject);
   const floor = currentFloors[index];
   const room = currentRooms.find(room => room.id === selectedSession);
-  const viewName = selectedSession === ALL_SESSIONS ? '모든 채팅' : room ? roomLabel(room) : '';
+  const viewName = selectedSession === ALL_SESSIONS ? msg("All chats", "모든 채팅") : room ? roomLabel(room) : '';
   el('floor-count').textContent = String(currentFloors.length);
   el('game').dataset.cameraScope = cameraScope;
   el('game').dataset.shot = buildingWide ? 'building' : 'room';
   // The building view is a two-step click (floor, then person), so its hint names both steps.
   const hint = document.querySelector<HTMLElement>('.scene-hint');
-  if (hint) syncHTML(hint, buildingWide ? '드래그로 360° 회전 <span>·</span> 층을 눌러 고르기 <span>·</span> 직원을 눌러 사무실로'
-    : '드래그로 360° 회전 <span>·</span> 휠로 확대 <span>·</span> 직원을 눌러 가까이');
-  el('camera-scope').textContent = '건물 전체 보기';
+  if (hint) syncHTML(hint, buildingWide ? `${msg("Drag to rotate 360° <span>·</span> Choose a floor <span>·</span> Click a team member to enter", "드래그로 360° 회전 <span>·</span> 층을 눌러 고르기 <span>·</span> 직원을 눌러 사무실로")}`
+    : `${msg("Drag to rotate 360° <span>·</span> Scroll to zoom <span>·</span> Click a team member for a closer look", "드래그로 360° 회전 <span>·</span> 휠로 확대 <span>·</span> 직원을 눌러 가까이")}`);
+  el('camera-scope').textContent = msg("View whole building", "건물 전체 보기");
   for (const button of document.querySelectorAll<HTMLButtonElement>('[data-building-cctv]')) {
     button.setAttribute('aria-pressed', String(buildingWide && !watch));
   }
   syncHTML(el('floor-list'), (currentFloors.map((item, i) => {
     const attention = attentionCount(item.agents), working = item.agents.filter(isWorkingAgent).length;
-    const summary = [...(working ? [`${working}명 작업 중`] : []), ...(attention ? [`${attention}명 확인 필요`] : [])].join(' · ') || '활동 없음';
+    const summary = [...(working ? [msg("{count} working", "{count}명 작업 중", { count: working })] : []), ...(attention ? [msg("{count} need attention", "{count}명 확인 필요", { count: attention })] : [])].join(' · ') || msg("No activity", "활동 없음");
     // Same order as the owner inbox (approval before error), with the shared table's colour and shape.
     const lampStatus = !bridgeConnected ? '' : item.agents.some(agent => agent.status === 'approval') ? 'approval'
       : item.agents.some(agent => agent.status === 'error') ? 'error' : working ? 'working' : '';
     const lamp = lampStatus ? ` data-status="${lampStatus}" data-shape="${statusStyleFor(lampStatus).shape}"` : '';
-    return `<button class="floor-button ${item.id === selectedProject ? 'selected' : ''}" data-floor="${escape(item.id)}" aria-label="${i + 1}층 ${escape(item.name)} · ${summary}" aria-pressed="${item.id === selectedProject}" title="${escape(item.name)} · ${summary}"><span class="floor-digit">${i + 1}<small>F</small></span><span class="floor-info"><strong>${escape(item.name)}</strong><small>${summary}</small></span><i class="floor-lamp"${lamp}></i></button>`;
+    return `<button class="floor-button ${item.id === selectedProject ? 'selected' : ''}" data-floor="${escape(item.id)}" aria-label="${msg("Floor {number}", "{number}층", { number: i + 1 })} ${escape(item.name)} · ${summary}" aria-pressed="${item.id === selectedProject}" title="${escape(item.name)} · ${summary}"><span class="floor-digit">${i + 1}<small>F</small></span><span class="floor-info"><strong>${escape(item.name)}</strong><small>${summary}</small></span><i class="floor-lamp"${lamp}></i></button>`;
   }).join('') || '<span class="rail-empty">—</span>') + dormantFloorsNote());
   syncHTML(el('project-select'), currentFloors.map((item, i) => `<option value="${escape(item.id)}">${i + 1}F · ${escape(item.name)}</option>`).join(''));
   el<HTMLSelectElement>('project-select').value = selectedProject;
   el<HTMLSelectElement>('project-select').disabled = !currentFloors.length;
   el('floor-number').textContent = floor ? `${index + 1}F` : '—';
-  el('room-title').textContent = floor?.name ?? '출근을 기다리는 사무실';
+  el('room-title').textContent = floor?.name ?? msg("Waiting for the team", "출근을 기다리는 사무실");
   const selector = el<HTMLSelectElement>('session-select');
-  const allOption = currentRooms.length > 1 || selectedSession === ALL_SESSIONS ? `<option value="${ALL_SESSIONS}">모든 채팅</option>` : '';
+  const allOption = currentRooms.length > 1 || selectedSession === ALL_SESSIONS ? `<option value="${ALL_SESSIONS}">${msg("All chats", "모든 채팅")}</option>` : '';
   syncHTML(selector, allOption + currentRooms.map(item => `<option value="${escape(item.id)}">${escape(roomLabel(item))}</option>`).join(''));
   selector.value = selectedSession; selector.hidden = !currentRooms.length;
-  selector.setAttribute('aria-label', `채팅 작업구역 ${currentRooms.length}개`);
-  el('room-count').textContent = currentRooms.length ? `${currentRooms.length}개 사무실` : '';
+  selector.setAttribute('aria-label', msg("{count} chat workspaces", "채팅 작업구역 {count}개", { count: currentRooms.length }));
+  el('room-count').textContent = currentRooms.length ? msg("{count} offices", "{count}개 사무실", { count: currentRooms.length }) : '';
   const roomActivity = activitySummary(visibleStaff());
   el('room-activity').textContent = roomActivity;
   el('staff-count').textContent = String(staff().length);
   el('active-count').textContent = bridgeConnected ? String(staff().filter(hasVisibleActivity).length) : '—';
   el('roster-active-count').textContent = String(staff().filter(hasVisibleActivity).length);
-  el('roster-summary').textContent = bridgeConnected ? activitySummary(staff()) : `연결 끊김 · 마지막으로 관측한 ${staff().length}명의 상태`;
+  el('roster-summary').textContent = bridgeConnected ? activitySummary(staff()) : msg("Disconnected · Last observed state of {count} team members", "연결 끊김 · 마지막으로 관측한 {count}명의 상태", { count: staff().length });
   el<HTMLButtonElement>('find-working').disabled = !staff().some(hasVisibleActivity);
-  el('find-working').title = attentionCount(staff()) ? '승인·오류 확인이 필요한 직원에게 이동' : '작업 중인 직원에게 이동';
+  el('find-working').title = attentionCount(staff()) ? msg("Go to someone who needs approval or error review", "승인·오류 확인이 필요한 직원에게 이동") : msg("Go to a working team member", "작업 중인 직원에게 이동");
   el('empty-office').hidden = !!staff().length || !stateLoaded;
   el('watch-caption').textContent = `${floor ? `${index + 1}F · ${floor.name}` : companyName}${viewName ? ` · ${viewName}` : ''}`;
   const wideFocus = watch && buildingWide && Date.now() - buildingWideStarted > 3500;
-  el('location-floor').textContent = buildingWide && !wideFocus ? `${currentFloors.length}개 층` : floor ? `${index + 1}F` : 'OFFICE';
-  el('location-mode').textContent = Date.now() < replayUntil ? '기록 다시 보기' : buildingWide ? '건물 전체 보기' : watch ? '자동 관찰' : '선택한 층';
+  el('location-floor').textContent = buildingWide && !wideFocus ? msg("{count} floors", "{count}개 층", { count: currentFloors.length }) : floor ? `${index + 1}F` : 'OFFICE';
+  el('location-mode').textContent = Date.now() < replayUntil ? msg("Replaying history", "기록 다시 보기") : buildingWide ? msg("View whole building", "건물 전체 보기") : watch ? msg("Auto observe", "자동 관찰") : msg("Selected floor", "선택한 층");
   el('location-project').textContent = buildingWide && !wideFocus ? companyName : floor?.name ?? companyName;
-  el('location-detail').textContent = buildingWide ? `${staff().filter(isWorkingAgent).length}명 작업 중 · ${currentFloors.length}개 프로젝트${wideFocus ? ' · 이 층으로 다가가는 중' : ''}` : `${viewName || '연결 대기'} · ${roomActivity}`;
+  el('location-detail').textContent = buildingWide ? `${msg("{working} working · {floors} projects", "{working}명 작업 중 · {floors}개 프로젝트", { working: staff().filter(isWorkingAgent).length, floors: currentFloors.length })}${wideFocus ? msg(" · Approaching this floor", " · 이 층으로 다가가는 중") : ''}` : `${viewName || msg("Waiting for connection", "연결 대기")} · ${roomActivity}`;
   const currentModels = modelActivity(staff(), events).filter(model => model.workingCount > 0 && bridgeConnected)
     .sort((a, b) => b.workingCount - a.workingCount);
-  syncHTML(el('model-signal'), currentModels.slice(0, 3).map(model => `<button data-open="models"><i class="model-dot ${model.workingCount && bridgeConnected ? 'lit' : ''}"></i><span>${escape(model.label)}</span><b>${model.workingCount}</b></button>`).join('') + (currentModels.length > 3 ? `<button data-open="models">+${currentModels.length - 3} 모델</button>` : ''));
+  syncHTML(el('model-signal'), currentModels.slice(0, 3).map(model => `<button data-open="models"><i class="model-dot ${model.workingCount && bridgeConnected ? 'lit' : ''}"></i><span>${escape(model.label)}</span><b>${model.workingCount}</b></button>`).join('') + (currentModels.length > 3 ? `<button data-open="models">+${currentModels.length - 3} ${msg("models", "모델")}</button>` : ''));
   const key = currentCameraKey();
   if (lastCameraKey !== key) { if (!buildingWide) scene?.resetCamera(); setZoomLock(false); lastCameraKey = key; director.roomChanged(); }
   measureSceneInsets();
@@ -494,15 +531,15 @@ function renderNavigation() {
 function dormantFloorsNote() {
   const count = office().dormant.length;
   if (!count) return '';
-  const label = `쉬는 층 ${count}개를 숨겼어요 · 설정에서 기간과 층수 바꾸기`;
-  return `<button id="dormant-floors" class="dormant-floors" data-open="settings" data-focus-setting="setting-dormantFloorMinutes" aria-label="${label}" title="${label}">${icon('clock')}<span>쉬는 층</span><b>${count}개</b><span>숨김</span></button>`;
+  const label = msg("{count} resting floors hidden · Change the time and floor limit in settings", "쉬는 층 {count}개를 숨겼어요 · 설정에서 기간과 층수 바꾸기", { count });
+  return `<button id="dormant-floors" class="dormant-floors" data-open="settings" data-focus-setting="setting-dormantFloorMinutes" aria-label="${label}" title="${label}">${icon('clock')}<span>${msg("Resting floors", "쉬는 층")}</span><b>${count}${msg("", "개")}</b><span>${msg("hidden", "숨김")}</span></button>`;
 }
 function renderDormantFloors() {
   const hidden = office().dormant;
   const names = hidden.slice(0, 6).map(floor => `${escape(floor.name)}(${relativeTime(floor.lastEventAt ?? '')})`).join(' · ');
-  el('dormant-floors-note').innerHTML = !settings.dormantFloorMinutes && !settings.maxFloors ? '모든 층을 건물에 계속 보여줘요.'
-    : hidden.length ? `지금 숨긴 층 ${hidden.length}개 · ${names}${hidden.length > 6 ? ` 외 ${hidden.length - 6}개` : ''}<br>직원 기록은 그대로이고, 그 프로젝트에서 새 소식이 오면 층이 다시 나타나요.`
-      : '지금 숨긴 층이 없어요.';
+  el('dormant-floors-note').innerHTML = !settings.dormantFloorMinutes && !settings.maxFloors ? msg("Keep every floor visible in the building.", "모든 층을 건물에 계속 보여줘요.")
+    : hidden.length ? `${msg("{count} floors hidden now", "지금 숨긴 층 {count}개", { count: hidden.length })} · ${names}${hidden.length > 6 ? `${msg(" and {count} more", " 외 {count}개", { count: hidden.length - 6 })}` : ''}<br>${msg("Team records are preserved. The floor returns when this project has a new update.", "직원 기록은 그대로이고, 그 프로젝트에서 새 소식이 오면 층이 다시 나타나요.")}`
+      : msg("No floors are hidden right now.", "지금 숨긴 층이 없어요.");
 }
 type PortraitSize = 'card' | 'owner' | 'roster' | 'inbox' | 'chip';
 function portrait(agent: Pick<Agent, 'id' | 'color'>, size: PortraitSize) {
@@ -554,7 +591,7 @@ function syncCardSheet() {
   if (card.hidden) el('game').removeAttribute('data-card-sheet'); else el('game').dataset.cardSheet = state;
   const toggle = el('card-sheet-toggle');
   toggle.setAttribute('aria-expanded', String(cardSheetExpanded && !card.hidden));
-  toggle.setAttribute('aria-label', cardSheetExpanded ? '카드 접기' : '카드 펼쳐 자세히 보기');
+  toggle.setAttribute('aria-label', cardSheetExpanded ? msg("Collapse card", "카드 접기") : msg("Expand card for details", "카드 펼쳐 자세히 보기"));
 }
 function setCardSheet(expanded: boolean) { cardSheetExpanded = expanded; syncCardSheet(); }
 /** Ends a sheet drag without choosing a state, so a card closed mid-drag reopens at its resting height. */
@@ -582,9 +619,14 @@ function floorPlaces() {
 /** Hierarchy badge from the reported role. Adapters send '개발' as their default classification, so it reads as a team member. */
 function rankLabel(agent: Agent) {
   const role = agent.role?.trim() ?? '';
-  if (role === '총괄') return '총괄';
-  if (role === '개발' || role === '하위 에이전트') return '팀원';
-  if (!role || (Object.values(sourceNames) as string[]).includes(role)) return agent.parentAgentId ? '팀원' : '';
+  if ((agent.source === 'codex' || agent.source === 'claude') && agent.observation === 'hook') {
+    if (role === '리서치') return msg('Research', '리서치');
+    if (role === '기획') return msg('Planning', '기획');
+    if (role === '검토') return msg('Review', '검토');
+  }
+  if (role === '총괄') return msg('Lead', '총괄');
+  if (role === '개발' || role === '하위 에이전트') return msg("Team member", "팀원");
+  if (!role || (Object.values(sourceNames) as string[]).includes(role)) return agent.parentAgentId ? msg("Team member", "팀원") : '';
   return role;
 }
 /** Approval requests before errors; within each, the longest-waiting report first. */
@@ -603,7 +645,7 @@ function employeeCardMarkup(agent: Agent) {
   const place = floorPlaces().get(projectKey(agent));
   const rank = rankLabel(agent);
   const model = agent.modelEvidence === 'reported' && agent.model ? agent.model : '';
-  const session = agent.sessionName ?? (agent.sessionId ? `채팅 ${agent.sessionId.slice(0, 8)}` : '');
+  const session = agent.sessionName ?? (agent.sessionId ? msg("Chat {id}", "채팅 {id}", { id: agent.sessionId.slice(0, 8) }) : '');
   const working = isWorkingStatus(agent.status);
   const inTask = working || agent.status === 'approval' || agent.status === 'error';
   const started = live && inTask && agent.taskStartedAt ? Date.parse(agent.taskStartedAt) : NaN;
@@ -615,25 +657,25 @@ function employeeCardMarkup(agent: Agent) {
   const children = list.filter(item => item.parentAgentId === agent.id);
   const chip = (member: Agent) => `<button class="team-chip" data-agent="${escape(member.id)}">${portrait(member, 'chip')}<span>${escape(member.name)}</span></button>`;
   // The collapsed bottom sheet shows only the header, so it carries a one-line status summary (hidden elsewhere, and from screen readers).
-  const summary = [label, live && isExternalCall(agent) ? EXTERNAL_CALL_LABEL : kind ? activityNames[kind] : ''].filter(Boolean).join(' · ');
-  const header = `<header class="badge-head">${portrait(agent, 'card')}<div class="badge-id"><div class="badge-kicker"><span class="badge-source">${escape(sourceNames[agent.source] ?? '')}</span>${rank ? `<span class="rank-badge${rank === '총괄' ? ' lead' : ''}">${escape(rank)}</span>` : ''}</div><h2 id="employee-card-title" tabindex="-1">${escape(agent.name)}</h2>${model ? `<span class="model-chip">${escape(model)}</span>` : ''}<span class="sheet-summary" aria-hidden="true">${statusShapeSVG(style, 12)}<span>${escape(summary)}</span></span></div></header>`;
-  const belongs = place || session ? `<div class="badge-place">${place ? `<button class="floor-chip" data-floor="${escape(projectKey(agent))}" aria-label="${place.number}층 ${escape(place.name)} 사무실로 이동">${icon('building')}<span>${place.number}F · ${escape(place.name)}</span>${icon('right')}</button>` : ''}${session ? `<div class="chat-line">${icon('chat')}<span>채팅방</span><strong>${escape(session)}</strong></div>` : ''}</div>` : '';
+  const summary = [label, live && isExternalCall(agent) ? externalCallLabel() : kind ? activityNames[kind] : ''].filter(Boolean).join(' · ');
+  const header = `<header class="badge-head">${portrait(agent, 'card')}<div class="badge-id"><div class="badge-kicker"><span class="badge-source">${escape(sourceNames[agent.source] ?? '')}</span>${rank ? `<span class="rank-badge${agent.role?.trim() === '총괄' ? ' lead' : ''}">${escape(rank)}</span>` : ''}</div><h2 id="employee-card-title" tabindex="-1">${escape(agent.name)}</h2>${model ? `<span class="model-chip">${escape(model)}</span>` : ''}<span class="sheet-summary" aria-hidden="true">${statusShapeSVG(style, 12)}<span>${escape(summary)}</span></span></div></header>`;
+  const belongs = place || session ? `<div class="badge-place">${place ? `<button class="floor-chip" data-floor="${escape(projectKey(agent))}" aria-label="${msg("Go to floor {number}", "{number}층", { number: place.number })} ${escape(place.name)}${msg(" office", " 사무실로 이동")}">${icon('building')}<span>${place.number}F · ${escape(place.name)}</span>${icon('right')}</button>` : ''}${session ? `<div class="chat-line">${icon('chat')}<span>${msg("Chat", "채팅방")}</span><strong>${escape(session)}</strong></div>` : ''}</div>` : '';
   const work = [
-    bridgeConnected ? '' : `<div class="stale-banner">${icon('unplug')}<span>연결 끊김${observed ? ` · 마지막 관측 ${time(observed)}` : ''}</span></div>`,
-    unconfirmed ? `<div class="stale-banner unconfirmed-banner">${icon('clock')}<span>${agent.lastEventAt && Number.isFinite(Date.parse(agent.lastEventAt)) ? '5분 동안 새 활동이 없어요.' : '마지막 활동 시각을 확인할 수 없어요.'} 마지막 상태: ${escape(statusStyleFor(agent.unconfirmedStatus!).label)}<br>현재 실행 여부는 미확인이며, 새 활동을 받으면 다시 표시해요.</span></div>` : '',
-    `<h3 class="card-section-title">${live ? '지금 하는 일' : '마지막으로 보인 일'}</h3>`,
-    `<div class="status-row"><span class="status-chip" style="--status:${style.color}">${statusShapeSVG(style)}${escape(label)}</span>${minutes >= 0 ? `<span class="elapsed" title="${escape(absoluteTime(agent.taskStartedAt!))} 시작">${icon('clock')}${minutes < 1 ? '1분 미만' : `${minutes}분째`}</span>` : ''}</div>`,
-    live && isExternalCall(agent) ? `<div class="work-line">${icon('phone')}<strong>${EXTERNAL_CALL_LABEL}</strong></div>`
-      : kind ? `<div class="work-line">${icon(`kind-${kind}`)}<strong>${escape(activityNames[kind])}</strong><span>도구 기준 추정</span></div>` : '',
-    live && working && agent.toolName ? `<div class="tool-line"><span>${icon('wrench')}사용 중 도구</span><code class="tool-chip">${escape(agent.toolName)}</code></div>` : '',
+    bridgeConnected ? '' : `<div class="stale-banner">${icon('unplug')}<span>${msg("Disconnected", "연결 끊김")}${observed ? ` · ${msg("Last observed", "마지막 관측")} ${time(observed)}` : ''}</span></div>`,
+    unconfirmed ? `<div class="stale-banner unconfirmed-banner">${icon('clock')}<span>${agent.lastEventAt && Number.isFinite(Date.parse(agent.lastEventAt)) ? msg("No new activity for 5 minutes.", "5분 동안 새 활동이 없어요.") : msg("The last activity time is unavailable.", "마지막 활동 시각을 확인할 수 없어요.")} ${msg("Last status:", "마지막 상태:")} ${escape(statusStyleFor(agent.unconfirmedStatus!).label)}<br>${msg("Current activity is unconfirmed. A new update will restore the live status.", "현재 실행 여부는 미확인이며, 새 활동을 받으면 다시 표시해요.")}</span></div>` : '',
+    `<h3 class="card-section-title">${live ? msg("Current work", "지금 하는 일") : msg("Last observed work", "마지막으로 보인 일")}</h3>`,
+    `<div class="status-row"><span class="status-chip" style="--status:${style.color}">${statusShapeSVG(style)}${escape(label)}</span>${minutes >= 0 ? `<span class="elapsed" title="${escape(absoluteTime(agent.taskStartedAt!))} ${msg("started", "시작")}">${icon('clock')}${minutes < 1 ? msg("Less than 1 minute", "1분 미만") : msg("{count} min", "{count}분째", { count: minutes })}</span>` : ''}</div>`,
+    live && isExternalCall(agent) ? `<div class="work-line">${icon('phone')}<strong>${externalCallLabel()}</strong></div>`
+      : kind ? `<div class="work-line">${icon(`kind-${kind}`)}<strong>${escape(activityNames[kind])}</strong><span>${msg("Estimated from tool use", "도구 기준 추정")}</span></div>` : '',
+    live && working && agent.toolName ? `<div class="tool-line"><span>${icon('wrench')}${msg("Tool in use", "사용 중 도구")}</span><code class="tool-chip">${escape(displayedToolName(agent))}</code></div>` : '',
     // Observers report only the generic MCP tool name, so the card says the other service is unknown rather than guessing it.
-    live && isExternalCall(agent) ? '<p class="call-note">상대 서비스 이름은 받지 않아요</p>' : '',
-    live && agent.status === 'approval' ? `<p class="card-note approval">${statusShapeSVG('approval', 13)}<span>원래 앱에서 승인하거나 거절해 주세요</span></p>` : '',
-    live && agent.status === 'error' ? `<p class="card-note error">${statusShapeSVG('error', 13)}<span>원래 앱에서 오류를 확인해 주세요</span></p>` : '',
-    agent.lastEventAt || agent.task ? `<div class="news-line">${agent.lastEventAt ? `<span title="${escape(absoluteTime(agent.lastEventAt))}">${icon('clock')}최근 소식 · ${live ? relativeTime(agent.lastEventAt, now) : time(agent.lastEventAt)}</span>` : ''}${agent.task ? `<p class="employee-task">${escape(agent.task)}</p>` : ''}</div>` : '',
+    live && isExternalCall(agent) ? msg("<p class=\"call-note\">The other service name is not reported.</p>", "<p class=\"call-note\">상대 서비스 이름은 받지 않아요</p>") : '',
+    live && agent.status === 'approval' ? `<p class="card-note approval">${statusShapeSVG('approval', 13)}<span>${msg("Approve or reject in the original app", "원래 앱에서 승인하거나 거절해 주세요")}</span></p>` : '',
+    live && agent.status === 'error' ? `<p class="card-note error">${statusShapeSVG('error', 13)}<span>${msg("Check the error in the original app", "원래 앱에서 오류를 확인해 주세요")}</span></p>` : '',
+    agent.lastEventAt || agent.task ? `<div class="news-line">${agent.lastEventAt ? `<span title="${escape(absoluteTime(agent.lastEventAt))}">${icon('clock')}${msg("Latest update · ", "최근 소식 · ")}${live ? relativeTime(agent.lastEventAt, now) : time(agent.lastEventAt)}</span>` : ''}${agent.task ? `<p class="employee-task">${escape(agentTask(agent, events))}</p>` : ''}</div>` : '',
   ].join('');
-  const team = parent || children.length ? `<div class="card-section team-section"><h3 class="card-section-title">팀</h3>${parent ? `<div class="team-row"><span class="team-label">상위</span>${chip(parent)}</div>` : ''}${children.length ? `<div class="team-row"><span class="team-label">하위</span>${children.slice(0, 4).map(chip).join('')}${children.length > 4 ? `<span class="team-more">외 ${children.length - 4}명</span>` : ''}</div>` : ''}</div>` : '';
-  return `${header}${belongs}<div class="card-section">${work}</div>${team}<button class="card-link" data-open="communications" data-feed-agent="${escape(agent.id)}">이 직원 소통 기록 ${icon('arrow')}</button>`;
+  const team = parent || children.length ? `<div class="card-section team-section"><h3 class="card-section-title">${msg("Team", "팀")}</h3>${parent ? `<div class="team-row"><span class="team-label">${msg("Parent", "상위")}</span>${chip(parent)}</div>` : ''}${children.length ? `<div class="team-row"><span class="team-label">${msg("Children", "하위")}</span>${children.slice(0, 4).map(chip).join('')}${children.length > 4 ? `<span class="team-more">${msg("{count} more", "외 {count}명", { count: children.length - 4 })}</span>` : ''}</div>` : ''}</div>` : '';
+  return `${header}${belongs}<div class="card-section">${work}</div>${team}<button class="card-link" data-open="communications" data-feed-agent="${escape(agent.id)}">${msg("This team member’s records ", "이 직원 소통 기록 ")}${icon('arrow')}</button>`;
 }
 function ownerCardMarkup(boss: Agent) {
   const list = staff();
@@ -644,24 +686,24 @@ function ownerCardMarkup(boss: Agent) {
   const errors = inbox.length - approvals;
   // Old active reports are neither work nor attention; their own cell (omitted at zero) keeps them from reading as 활동 없음.
   const unconfirmed = list.filter(agent => agent.unconfirmedStatus).length;
-  const breakdown = [approvals ? `확인 요청 ${approvals}` : '', errors ? `오류 ${errors}` : ''].filter(Boolean).join(' · ');
+  const breakdown = [approvals ? msg("Approval requests {count}", "확인 요청 {count}", { count: approvals }) : '', errors ? msg("Errors {count}", "오류 {count}", { count: errors }) : ''].filter(Boolean).join(' · ');
   const stat = (key: string, mark: string, value: number, unit: string, name: string, detail: string, label: string) =>
     `<button class="company-stat" data-boss-stat="${key}" aria-label="${label}"><span class="stat-value">${mark}<b>${value}</b><small>${unit}</small></span><span class="stat-name">${name}</span>${detail ? `<span class="stat-detail">${detail}</span>` : ''}</button>`;
   // A zero count is left out rather than shown as a cell; nothing at all reads as 활동 없음.
   const stats = [
-    working ? stat('working', statusShapeSVG('working'), working, '명', '작업 중', '', `작업 중 ${working}명, 활동 목록 열기`) : '',
-    inbox.length ? stat('attention', statusShapeSVG(approvals ? 'approval' : 'error'), inbox.length, '건', '확인 필요', breakdown, `확인 필요 ${inbox.length}건(${breakdown}), 확인할 직원에게 이동`) : '',
-    unconfirmed ? stat('unconfirmed', statusShapeSVG(UNCONFIRMED_STYLE), unconfirmed, '명', '상태 미확인', '', `상태 미확인 ${unconfirmed}명, 전체 직원 목록 열기`) : '',
-    places.size ? stat('floors', icon('building'), places.size, '개', '프로젝트 층', '', `프로젝트 층 ${places.size}개, 건물 전체 보기`) : '',
+    working ? stat('working', statusShapeSVG('working'), working, msg("", "명"), msg("Working", "작업 중"), '', msg("{count} working, open active team", "작업 중 {count}명, 활동 목록 열기", { count: working })) : '',
+    inbox.length ? stat('attention', statusShapeSVG(approvals ? 'approval' : 'error'), inbox.length, msg("", "건"), msg("Needs attention", "확인 필요"), breakdown, msg("{count} need attention ({detail}), go to a team member", "확인 필요 {count}건({detail}), 확인할 직원에게 이동", { count: inbox.length, detail: breakdown })) : '',
+    unconfirmed ? stat('unconfirmed', statusShapeSVG(UNCONFIRMED_STYLE), unconfirmed, msg("", "명"), msg("Status unknown", "상태 미확인"), '', msg("{count} with unknown status, open all team members", "상태 미확인 {count}명, 전체 직원 목록 열기", { count: unconfirmed })) : '',
+    places.size ? stat('floors', icon('building'), places.size, msg("", "개"), msg("Project floors", "프로젝트 층"), '', msg("{count} project floors, view whole building", "프로젝트 층 {count}개, 건물 전체 보기", { count: places.size })) : '',
   ].join('');
-  const basis = bridgeConnected ? '지금 기준' : `연결 끊김${disconnectedAt ? ` · 마지막 관측 ${time(disconnectedAt)}` : ''}`;
+  const basis = bridgeConnected ? msg("As of now", "지금 기준") : `${msg("Disconnected", "연결 끊김")}${disconnectedAt ? ` · ${msg("Last observed", "마지막 관측")} ${time(disconnectedAt)}` : ''}`;
   const rows = inbox.slice(0, 3).map(agent => {
     const place = places.get(projectKey(agent));
     return `<button class="inbox-row" data-agent="${escape(agent.id)}">${portrait(agent, 'inbox')}<span class="inbox-copy"><strong>${escape(agent.name)}</strong><span>${statusShapeSVG(agent.status, 11)}<span>${place ? `${place.number}F · ${escape(place.name)} · ` : ''}${escape(statusStyleFor(agent.status).label)}</span></span></span>${icon('right')}</button>`;
   }).join('');
-  return `<div class="card-kicker">대표 명함</div><div class="owner-card"><div class="owner-copy"><span class="owner-company">${escape(companySettings.companyName)}</span><div class="owner-name"><h2 id="employee-card-title" tabindex="-1">${escape(companySettings.ownerName)}</h2><span class="owner-badge">대표</span></div><span class="owner-rule" aria-hidden="true"></span></div>${portrait(boss, 'owner')}</div>`
-    + `<div class="card-block"><h3 class="card-section-title"><span>회사 현황</span><span>${basis}</span></h3>${stats ? `<div class="company-stats">${stats}</div>` : '<p class="company-quiet">활동 없음</p>'}</div>`
-    + (rows ? `<div class="card-block"><h3 class="card-section-title"><span class="inbox-title">${icon('inbox')}결재함</span><span>${inbox.length > 3 ? `총 ${inbox.length}명 중 3명` : `${inbox.length}명`}</span></h3><div class="inbox-list">${rows}</div></div><p class="owner-note">${icon('info')}승인은 원래 앱에서 해요</p>` : '');
+  return `<div class="card-kicker">${msg("Owner card", "대표 명함")}</div><div class="owner-card"><div class="owner-copy"><span class="owner-company">${escape(companySettings.companyName)}</span><div class="owner-name"><h2 id="employee-card-title" tabindex="-1">${escape(companySettings.ownerName)}</h2><span class="owner-badge">${msg("Owner", "대표")}</span></div><span class="owner-rule" aria-hidden="true"></span></div>${portrait(boss, 'owner')}</div>`
+    + `<div class="card-block"><h3 class="card-section-title"><span>${msg("Company status", "회사 현황")}</span><span>${basis}</span></h3>${stats ? `<div class="company-stats">${stats}</div>` : msg("<p class=\"company-quiet\">No activity</p>", "<p class=\"company-quiet\">활동 없음</p>")}</div>`
+    + (rows ? `<div class="card-block"><h3 class="card-section-title"><span class="inbox-title">${icon('inbox')}${msg("Inbox", "결재함")}</span><span>${inbox.length > 3 ? msg("3 of {count} team members", "총 {count}명 중 3명", { count: inbox.length }) : msg("{count} team members", "{count}명", { count: inbox.length })}</span></h3><div class="inbox-list">${rows}</div></div><p class="owner-note">${icon('info')}${msg("Approve requests in the original app", "승인은 원래 앱에서 해요")}</p>` : '');
 }
 function runOwnerStat(kind: string) {
   if (kind === 'working') { rosterFilter = 'active'; openPanel('team'); }
@@ -683,25 +725,25 @@ function renderRoster() {
     button.classList.toggle('active', button.dataset.rosterFilter === rosterFilter);
     button.setAttribute('aria-pressed', String(button.dataset.rosterFilter === rosterFilter));
   }
-  syncHTML(el('roster'), groups.map(floor => `<div class="roster-floor"><h3>${escape(floor.name)}<span>${floor.agents.length}명</span></h3>${floor.agents.map(agent => `<button class="employee-row" data-agent="${escape(agent.id)}">${portrait(agent, 'roster')}<span class="employee-row-copy"><strong>${agent.parentAgentId ? '↳ ' : ''}${escape(agent.name)}</strong><small>${escape(modelName(agent))}</small></span><span class="employee-status">${statusShapeSVG(presentedStatusStyle(agent), 12)}${escape(statusLabel(agent))}</span>${icon('right')}</button>`).join('')}</div>`).join('') || `<div class="panel-empty">${rosterFilter === 'active' && staff().length ? '현재 활동 중인 직원이 없어요.<br>이전 기록은 전체 직원에서 볼 수 있어요.' : '아직 연결된 직원이 없어요.<br>원래 앱에서 작업을 시작해주세요.'}</div>`);
+  syncHTML(el('roster'), groups.map(floor => `<div class="roster-floor"><h3>${escape(floor.name)}<span>${floor.agents.length}${msg(" people", "명")}</span></h3>${floor.agents.map(agent => `<button class="employee-row" data-agent="${escape(agent.id)}">${portrait(agent, 'roster')}<span class="employee-row-copy"><strong>${agent.parentAgentId ? '↳ ' : ''}${escape(agent.name)}</strong><small>${escape(modelName(agent))}</small></span><span class="employee-status">${statusShapeSVG(presentedStatusStyle(agent), 12)}${escape(statusLabel(agent))}</span>${icon('right')}</button>`).join('')}</div>`).join('') || `<div class="panel-empty">${rosterFilter === 'active' && staff().length ? msg("No one is active right now.<br>See All team members for previous records.", "현재 활동 중인 직원이 없어요.<br>이전 기록은 전체 직원에서 볼 수 있어요.") : msg("No team members are connected yet.<br>Start work in the original app.", "아직 연결된 직원이 없어요.<br>원래 앱에서 작업을 시작해주세요.")}</div>`);
 }
 function renderModels() {
   const models = modelActivity(staff(), events).filter(model => model.connectedCount > 0);
   syncHTML(el('model-activity'), models.map(model => {
     const working = staff().filter(agent => modelName(agent) === model.label && isWorkingAgent(agent));
-    return `<article class="model-card"><div class="model-card-heading"><span class="model-emblem">${icon('model')}</span><div><h3>${escape(model.label)}</h3><p>${model.connectedCount}명 관측됨 · ${bridgeConnected ? `${model.workingCount}명 작업 중` : '연결 끊김'}</p></div></div><div class="model-counters"><span><b>${model.toolStarts}</b>도구 시작</span><span><b>${model.handoffs}</b>서류 전달</span><span><b>${model.responsesEnded}</b>응답 종료</span></div>${working.slice(0, 3).map(agent => `<button class="model-task" data-agent="${escape(agent.id)}">${statusShapeSVG(agent.status, 12)}<span><strong>${escape(agent.name)}</strong>${escape(agent.task)}</span>${icon('right')}</button>`).join('')}</article>`;
-  }).join('') || '<div class="panel-empty">모델 정보가 도착하면 여기에 표시돼요.</div>');
+    return `<article class="model-card"><div class="model-card-heading"><span class="model-emblem">${icon('model')}</span><div><h3>${escape(model.label)}</h3><p>${msg("{count} observed", "{count}명 관측됨", { count: model.connectedCount })} · ${bridgeConnected ? msg("{count} working", "{count}명 작업 중", { count: model.workingCount }) : msg("Disconnected", "연결 끊김")}</p></div></div><div class="model-counters"><span><b>${model.toolStarts}</b>${msg("Tool starts", "도구 시작")}</span><span><b>${model.handoffs}</b>${msg("Document handoffs", "서류 전달")}</span><span><b>${model.responsesEnded}</b>${msg("Responses ended", "응답 종료")}</span></div>${working.slice(0, 3).map(agent => `<button class="model-task" data-agent="${escape(agent.id)}">${statusShapeSVG(agent.status, 12)}<span><strong>${escape(agent.name)}</strong>${escape(agentTask(agent, events))}</span>${icon('right')}</button>`).join('')}</article>`;
+  }).join('') || msg("<div class=\"panel-empty\">Model information will appear here when reported.</div>", "<div class=\"panel-empty\">모델 정보가 도착하면 여기에 표시돼요.</div>"));
 }
 function eventMarkup(event: OfficeEvent) {
-  const who = event.type === 'user.instruction' ? `${companySettings.ownerName} 사장님` : event.agentName ?? agents.find(a => a.id === event.agentId)?.name ?? event.agentId;
+  const who = event.type === 'user.instruction' ? msg("{name}, owner", "{name} 사장님", { name: companySettings.ownerName }) : event.agentName ?? agents.find(a => a.id === event.agentId)?.name ?? event.agentId;
   const toId = event.type === 'user.instruction' ? event.toAgentId ?? event.agentId : event.type === 'message.sent' ? undefined : event.toAgentId;
   const to = toId ? event.toAgentName ?? agents.find(a => a.id === toId)?.name ?? toId : undefined;
   const kind = ['handoff', 'user.instruction', 'message.sent'].includes(event.type) ? 'handoff' : event.type.startsWith('approval.') ? 'approval' : 'work';
-  const label = event.type === 'agent.completed' ? '응답 종료' : event.type === 'user.instruction' ? '업무 지시' : event.type === 'message.sent' ? '메시지 송신' : event.type === 'approval.resolved' ? '확인 결과' : '';
+  const label = event.type === 'agent.completed' ? msg("Response ended", "응답 종료") : event.type === 'user.instruction' ? msg("Instruction", "업무 지시") : event.type === 'message.sent' ? msg("Message sent", "메시지 송신") : event.type === 'approval.resolved' ? msg("Review result", "확인 결과") : '';
   const endpoints = communicationEndpoints(event);
   // Decision 50: a replayed instruction would only open the building view without a flight, so the history offers no replay for it.
   const canReplay = event.type !== 'user.instruction' && endpoints.length > 0 && endpoints.every(id => staff().some(agent => agent.id === id));
-  return `<article class="feed-event"><span class="event-icon event-${kind}">${icon(kind === 'handoff' ? 'file' : kind === 'approval' ? 'bell' : 'activity')}</span><div><div class="event-route"><strong>${escape(who)}</strong>${to && kind === 'handoff' ? `<span>→</span><strong>${escape(to)}</strong>` : ''}</div><p>${label ? `${label} · ` : ''}${escape(event.title)}</p><small>${time(event.timestamp)} · ${sourceNames[event.source]}${event.projectName ? ` · ${escape(event.projectName)}` : ''}${event.observation ? ` · ${observationNames[event.observation] ?? '미확인'}` : ''}</small>${canReplay ? `<button class="handoff-replay" data-replay="${escape(event.id)}">비행 다시 보기 ${icon('play')}</button>` : ''}</div></article>`;
+  return `<article class="feed-event"><span class="event-icon event-${kind}">${icon(kind === 'handoff' ? 'file' : kind === 'approval' ? 'bell' : 'activity')}</span><div><div class="event-route"><strong>${escape(who)}</strong>${to && kind === 'handoff' ? `<span>→</span><strong>${escape(to)}</strong>` : ''}</div><p>${label ? `${label} · ` : ''}${escape(eventTitle(event))}</p><small>${time(event.timestamp)} · ${sourceNames[event.source]}${event.projectName ? ` · ${escape(event.projectName)}` : ''}${event.observation ? ` · ${observationNames[event.observation] ?? msg("Unknown", "미확인")}` : ''}</small>${canReplay ? `<button class="handoff-replay" data-replay="${escape(event.id)}">${msg("Replay flight ", "비행 다시 보기 ")}${icon('play')}</button>` : ''}</div></article>`;
 }
 function syncFeedFilters() {
   document.querySelectorAll<HTMLElement>('[data-filter]').forEach(button => {
@@ -719,29 +761,29 @@ function renderFeed() {
   const list = events.filter(event => (filter === 'all' || (filter === 'handoff' ? ['handoff', 'user.instruction', 'message.sent'].includes(event.type) : event.type.startsWith('approval.')))
     && (!feedAgent || event.agentId === feedAgent || event.toAgentId === feedAgent));
   el('feed-agent-filter').hidden = !feedAgent;
-  syncHTML(el('feed-agent-filter'), feedAgent ? `<span>${icon('people')}<span><strong>${escape(person?.name ?? feedAgent)}</strong>의 기록만 보는 중</span></span><button data-feed-clear="true">모든 직원 보기</button>` : '');
-  syncHTML(el('feed'), list.slice(0, 100).map(eventMarkup).join('') || `<div class="panel-empty">${feedAgent ? '이 직원의 기록이 아직 없어요.<br>작업 소식이 도착하면 여기에 표시돼요.' : '아직 수신한 기록이 없어요.<br>실제 전달이나 확인 요청이 생기면 여기에 표시돼요.'}</div>`);
+  syncHTML(el('feed-agent-filter'), feedAgent ? `<span>${icon('people')}<span><strong>${escape(person?.name ?? feedAgent)}</strong>${msg(" records only", "의 기록만 보는 중")}</span></span><button data-feed-clear="true">${msg("Show all team members", "모든 직원 보기")}</button>` : '');
+  syncHTML(el('feed'), list.slice(0, 100).map(eventMarkup).join('') || `<div class="panel-empty">${feedAgent ? msg("No records for this team member yet.<br>Work updates will appear here.", "이 직원의 기록이 아직 없어요.<br>작업 소식이 도착하면 여기에 표시돼요.") : msg("No records received yet.<br>Messages and approval requests will appear here.", "아직 수신한 기록이 없어요.<br>실제 전달이나 확인 요청이 생기면 여기에 표시돼요.")}</div>`);
 }
 function renderDispatch() {
   const latest = events[0];
-  if (!latest) return;
-  const sender = latest.type === 'user.instruction' ? `${companySettings.ownerName} 사장님` : latest.agentName ?? agents.find(agent => agent.id === latest.agentId)?.name ?? latest.agentId;
+  if (!latest) { el('dispatch-text').textContent = msg('Waiting for the next update', '직원들의 다음 소식을 기다리는 중'); return; }
+  const sender = latest.type === 'user.instruction' ? msg("{name}, owner", "{name} 사장님", { name: companySettings.ownerName }) : latest.agentName ?? agents.find(agent => agent.id === latest.agentId)?.name ?? latest.agentId;
   const toId = latest.type === 'user.instruction' ? latest.toAgentId ?? latest.agentId : latest.type === 'message.sent' ? undefined : latest.toAgentId;
   const to = toId ? latest.toAgentName ?? agents.find(agent => agent.id === toId)?.name ?? toId : undefined;
-  el('dispatch-text').textContent = `${sender}${to ? ` → ${to}` : ''} · ${latest.title}`;
+  el('dispatch-text').textContent = `${sender}${to ? ` → ${to}` : ''} · ${eventTitle(latest)}`;
   el('dispatch-time').textContent = time(latest.timestamp);
 }
 function renderConnection() {
   communicationTime();
-  el('connection-label').textContent = bridgeConnected ? '실시간 수신' : '재연결 중';
+  el('connection-label').textContent = bridgeConnected ? msg("Receiving live", "실시간 수신") : msg("Reconnecting", "재연결 중");
   el('live-lamp').classList.toggle('connected', bridgeConnected);
   el('game').classList.toggle('disconnected', !bridgeConnected);
   el('connection-notice').hidden = bridgeConnected;
-  el('connection-notice').textContent = stateLoaded ? '연결이 끊겨 마지막 상태를 표시하고 있어요. 다시 연결되면 동작이 이어져요.' : '로컬 사무실에 연결하고 있어요…';
-  el('bridge-state').innerHTML = `<i class="status-dot ${bridgeConnected ? 'bridge-live' : 'bridge-lost'}"></i><div><strong>${bridgeConnected ? '로컬 수신기 연결됨' : '로컬 수신기 재연결 중'}</strong><small>${stateAvailable ? '최근 직원 상태와 기록을 불러왔어요.' : '다음 작업 소식을 기다려요.'}</small></div>`;
+  el('connection-notice').textContent = stateLoaded ? msg("Disconnected. Showing the last known state until the connection returns.", "연결이 끊겨 마지막 상태를 표시하고 있어요. 다시 연결되면 동작이 이어져요.") : msg("Connecting to the local office…", "로컬 사무실에 연결하고 있어요…");
+  el('bridge-state').innerHTML = `<i class="status-dot ${bridgeConnected ? 'bridge-live' : 'bridge-lost'}"></i><div><strong>${bridgeConnected ? msg("Local receiver connected", "로컬 수신기 연결됨") : msg("Reconnecting to local receiver", "로컬 수신기 재연결 중")}</strong><small>${stateAvailable ? msg("Loaded recent team states and records.", "최근 직원 상태와 기록을 불러왔어요.") : msg("Waiting for the next work update.", "다음 작업 소식을 기다려요.")}</small></div>`;
   el('sources-state').innerHTML = (['codex', 'claude'] as const).map(source => {
     const count = staff().filter(agent => agent.source === source).length;
-    return `<div class="source-row"><strong>${sourceNames[source]}</strong><span>${count ? `${count}명 관측됨` : '직원 대기'}</span></div>`;
+    return `<div class="source-row"><strong>${sourceNames[source]}</strong><span>${count ? msg("{count} observed", "{count}명 관측됨", { count }) : msg("Waiting for team members", "직원 대기")}</span></div>`;
   }).join('');
   scene?.setPaused(paused || !bridgeConnected);
   if (bridgeObserved) scene?.setBridgeConnected?.(bridgeConnected);
@@ -772,8 +814,9 @@ function queueRender() {
   renderPending = true;
   requestAnimationFrame(() => { renderPending = false; if (!disposed) renderAll(); });
 }
-const titles: Record<string, [string, string]> = { team: ['우리 직원들', 'THE TEAM'], models: ['모델들의 근무 현황', 'MODEL ACTIVITY'], communications: ['서로 주고받은 소식', 'OFFICE POST'], settings: ['사무실 설정', 'SETTINGS'], usage: ['회사의 에너지', 'SHARED ENERGY'] };
+const panelTitles = (): Record<string, [string, string]> => ({ team: [msg('Our team', '우리 직원들'), 'THE TEAM'], models: [msg('Model activity', '모델들의 근무 현황'), 'MODEL ACTIVITY'], communications: [msg('Office exchanges', '서로 주고받은 소식'), 'OFFICE POST'], settings: [msg('Office settings', '사무실 설정'), 'SETTINGS'], usage: [msg('Company energy', '회사의 에너지'), 'SHARED ENERGY'] });
 function openPanel(next: string, usageProvider?: string) {
+  const titles = panelTitles();
   if (!(next in titles)) return;
   panel = next; closeEmployee();
   if (next === 'settings' && !companyFormDirty && !companySaving) syncCompanyForm();
@@ -801,6 +844,10 @@ function restorePanelOpener() {
   if (!selector || dialog.open || (active instanceof HTMLElement && active !== document.body && !dialog.contains(active))) return;
   document.querySelector<HTMLElement>(selector)?.focus({ preventScroll: true });
 }
+function setDirectorCaption(message: () => string) {
+  directorCaption = message;
+  el('director-caption').textContent = message();
+}
 function syncObservationCamera() {
   const moving = watch && settings.autoRotate;
   const enabled = moving && patrolRooms().length > 0;
@@ -808,13 +855,13 @@ function syncObservationCamera() {
   const button = el<HTMLButtonElement>('orbit');
   button.setAttribute('aria-pressed', String(moving));
   button.disabled = !watch;
-  button.title = watch ? `높낮이·줌·방향 움직임 ${moving ? '끄기' : '켜기'}` : '관찰 모드를 켜면 사용할 수 있어요';
+  button.title = watch ? moving ? msg('Turn off camera movement', '높낮이·줌·방향 움직임 끄기') : msg('Turn on camera movement', '높낮이·줌·방향 움직임 켜기') : msg("Available when auto observe is on", "관찰 모드를 켜면 사용할 수 있어요");
 }
-function applySettings(persist = false) {
+function applySettings(persist = false, resetCameraCycle = true) {
   scene?.setReducedMotion(settings.reducedMotion);
   if (!settings.followWork && director.focusedId !== null) {
     scene?.stopFollowing(); director.hold();
-    el('director-caption').textContent = '';
+    setDirectorCaption(() => '');
   }
   syncObservationCamera();
   scene?.setLabelsVisible(settings.labels);
@@ -822,18 +869,70 @@ function applySettings(persist = false) {
   scene?.setPowerSaving(settings.powerSaving);
   el('game').classList.toggle('reduced-motion', settings.reducedMotion);
   for (const key of ['labels', 'bubbles', 'autoRotate', 'followWork', 'cycle', 'powerSaving', 'reducedMotion'] as const) el<HTMLInputElement>(`setting-${key}`).checked = settings[key];
-  el('motion-preference-note').textContent = settings.reducedMotionOverride === null ? '기기의 움직임 설정을 따르고 있어요.' : '이 앱에서 직접 정한 설정을 사용해요.';
+  el('motion-preference-note').textContent = settings.reducedMotionOverride === null ? msg("Following your device motion preference.", "기기의 움직임 설정을 따르고 있어요.") : msg("Using the motion preference set in this app.", "이 앱에서 직접 정한 설정을 사용해요.");
   el<HTMLButtonElement>('setting-systemMotion').disabled = settings.reducedMotionOverride === null;
+  el<HTMLSelectElement>('setting-language').value = settings.language;
   el<HTMLSelectElement>('setting-cycleSeconds').value = String(settings.cycleSeconds);
   el<HTMLSelectElement>('setting-dormantFloorMinutes').value = String(settings.dormantFloorMinutes);
   el<HTMLSelectElement>('setting-maxFloors').value = String(settings.maxFloors);
-  resetCycle();
+  if (resetCameraCycle) resetCycle();
   if (persist) {
     let saved = false;
     try { saved = saveViewSettings(localStorage, settings); } catch { /* In-memory preferences remain usable. */ }
-    el('settings-saved').textContent = saved ? '이 브라우저에 저장했어요.' : '이번 창에 적용했어요. 브라우저 저장 공간을 사용할 수 없어요.';
+    settingsSavedState = saved;
+    el('settings-saved').textContent = saved ? msg("Saved in this browser.", "이 브라우저에 저장했어요.") : msg("Applied to this window. Browser storage is unavailable.", "이번 창에 적용했어요. 브라우저 저장 공간을 사용할 수 없어요.");
   }
 }
+function notifyNativeLanguage() {
+  try { (window as OfficeWindow).webkit?.messageHandlers?.officeLanguage?.postMessage(settings.language); }
+  catch { /* Browser-only windows and older launchers still keep the local preference. */ }
+}
+function changeLanguage(language: Language, persist = true, notifyNative = true) {
+  if (disposed || settings.language === language) return;
+  settings.language = language;
+  setLanguage(language); document.documentElement.lang = language;
+  localizeShell(document);
+  renderCompanySettings(document, companySettings);
+  scene?.refreshLanguage?.();
+  if (!scene) renderWebGLError();
+  applySettings(false, false);
+  if (persist) {
+    let saved = false;
+    try {
+      // A language-only change must not overwrite another window's newer display preferences.
+      const persisted = readViewSettings(localStorage, motionPreference.matches);
+      saved = saveViewSettings(localStorage, { ...persisted, language });
+    } catch { /* Keep the selected language usable when browser storage is unavailable. */ }
+    settingsSavedState = saved;
+  }
+  if (panel) {
+    const title = panelTitles()[panel];
+    if (title) { el('panel-title').textContent = title[0]; el('panel-eyebrow').textContent = title[1]; }
+  }
+  if (toastMessage && !el('toast').hidden) el('toast').textContent = toastMessage();
+  if (companyStatusMessage) el('company-save-status').textContent = companyStatusMessage();
+  if (settingsSavedState !== undefined) el('settings-saved').textContent = settingsSavedState
+    ? msg('Saved in this browser.', '이 브라우저에 저장했어요.')
+    : msg('Applied to this window. Browser storage is unavailable.', '이번 창에 적용했어요. 브라우저 저장 공간을 사용할 수 없어요.');
+  else el('settings-saved').textContent = msg('Display settings are saved in this browser.', '화면 설정은 이 브라우저에 저장돼요.');
+  el('director-caption').textContent = directorCaption();
+  el('pause').innerHTML = `${icon(paused ? 'play' : 'pause')} ${paused ? msg('Resume team animation', '직원 동작 다시 재생') : msg('Pause team animation', '직원 동작 일시정지')}`;
+  el('fullscreen').setAttribute('aria-label', document.fullscreenElement ? msg('Exit fullscreen', '전체 화면 나가기') : msg('Fullscreen', '전체 화면'));
+  syncCardSheet(); renderAll(); renderConnection(); renderEnergy();
+  renderCycleStatus();
+  el('scene-clock').textContent = new Date().toLocaleTimeString(locale(), { hour: '2-digit', minute: '2-digit', second: '2-digit', hour12: false });
+  if (notifyNative) notifyNativeLanguage();
+}
+(window as OfficeWindow).cubirumiSetLanguage = value => changeLanguage(normalizeLanguage(value), true, false);
+el('setting-language').addEventListener('change', () => changeLanguage(normalizeLanguage(el<HTMLSelectElement>('setting-language').value)));
+window.addEventListener('storage', event => {
+  if (event.key !== VIEW_SETTINGS_KEY) return;
+  try {
+    const saved: unknown = event.newValue ? JSON.parse(event.newValue) : {};
+    changeLanguage(normalizeLanguage(saved && typeof saved === 'object' && 'language' in saved ? saved.language : undefined), false);
+  } catch { /* Ignore malformed storage updates instead of replacing a valid preference. */ }
+});
+
 function setWatch(next: boolean) {
   watch = next;
   if (watch) {
@@ -844,7 +943,7 @@ function setWatch(next: boolean) {
     if (cameraScope === 'building' && activeFloorCount() > 1) beginBuildingOverview();
     else if (buildingWide) finishBuildingOverview();
   } else {
-    scene?.stopFollowing(); director.hold(); el('director-caption').textContent = '';
+    scene?.stopFollowing(); director.hold(); setDirectorCaption(() => '');
   }
   syncObservationCamera();
   el('game').classList.toggle('watching', watch);
@@ -852,10 +951,10 @@ function setWatch(next: boolean) {
   el('watch-toggle').setAttribute('aria-pressed', String(watch));
   resetCycle();
   renderNavigation();
-  if (watch) toast('자동 관찰을 시작했어요. 직접 조작하거나 Esc를 누르면 멈춰요.');
+  if (watch) toast(() => msg("Auto observe started. Use a control or press Esc to stop.", "자동 관찰을 시작했어요. 직접 조작하거나 Esc를 누르면 멈춰요."));
 }
 function setZoomLock(next: boolean) {
-  if (next && !zoomLock) toast('선택한 화면을 유지해요. 다시 둘러보려면 관찰 모드를 켜주세요.');
+  if (next && !zoomLock) toast(() => msg("Keeping this view. Turn on auto observe to look around again.", "선택한 화면을 유지해요. 다시 둘러보려면 관찰 모드를 켜주세요."));
   zoomLock = next;
   el('game').dataset.zoomLock = String(next);
 }
@@ -863,7 +962,7 @@ function manualCamera(viewChanged = false) {
   if (viewChanged) setWatch(false);
   manualUntil = Date.now() + 18_000;
   if (buildingWide) buildingWideUntil = Math.max(buildingWideUntil, manualUntil);
-  scene?.stopFollowing(); resetCycle(); director.hold(); el('director-caption').textContent = '';
+  scene?.stopFollowing(); resetCycle(); director.hold(); setDirectorCaption(() => '');
   // Zoom, drag and keyboard input decide the lock; a bare click only postpones automation as before.
   if (viewChanged) setZoomLock(scene?.isZoomedIn() ?? false);
 }
@@ -873,10 +972,10 @@ function updateDirector() {
   if (enabled && director.focusedId && !visibleStaff().some(agent => agent.id === director.focusedId && hasVisibleActivity(agent))) {
     // Release an expired target immediately even when other employees still have live work.
     scene?.focus(null, { cinematic: true, zoom: 1 }); director.roomChanged();
-    el('director-caption').textContent = '';
+    setDirectorCaption(() => '');
   }
   if (watch && !visibleStaff().some(hasVisibleActivity)) {
-    el('director-caption').textContent = '';
+    setDirectorCaption(() => '');
     if (enabled && !buildingWide && director.focusedId !== null) {
       scene?.focus(null, { cinematic: true, zoom: 1 }); director.roomChanged();
     }
@@ -887,7 +986,7 @@ function updateDirector() {
   if (!shot) return;
   scene?.focus(shot.agentId, { cinematic: true, zoom: shot.zoom });
   const name = agents.find(agent => agent.id === shot.agentId)?.name;
-  el('director-caption').textContent = name ? `${name} 따라보는 중` : '';
+  setDirectorCaption(() => name ? msg("Following {name}", "{name} 따라보는 중", { name }) : '');
 }
 function renderEnergy() {
   syncHTML(el('energy-tanks'), renderEnergyCards(usage, { receiverUnavailable: usageUnavailable }));
@@ -919,7 +1018,7 @@ function tick() {
   for (const [id, until] of communicationSeats) if (until <= seatTime) { communicationSeats.delete(id); seatsExpired = true; }
   // A quiet bridge still advances wall time, including after a hidden or paused window resumes.
   if (seatsExpired || freshnessKey() !== renderedFreshness) renderAll();
-  el('scene-clock').textContent = new Date().toLocaleTimeString('ko-KR', { hour: '2-digit', minute: '2-digit', second: '2-digit', hour12: false });
+  el('scene-clock').textContent = new Date().toLocaleTimeString(locale(), { hour: '2-digit', minute: '2-digit', second: '2-digit', hour12: false });
   // Self-heal: a lock only lasts while the camera is actually zoomed past the automatic shot.
   if (zoomLock && scene && !scene.isZoomedIn()) setZoomLock(false);
   const candidates = patrolRooms();
@@ -939,7 +1038,7 @@ function tick() {
     const changedFloor = selectedProject !== next.projectId;
     pickRoom(next.projectId, next.sessionId, true);
     overviewUntil = Date.now() + next.focusAfterMs;
-    el('director-caption').textContent = next.reason === 'activity' ? '새 작업이 시작된 층으로' : next.reason === 'fairness' || next.reason === 'quiet' ? '다른 사무실도 둘러보는 중' : '사무실 전체를 둘러보는 중';
+    setDirectorCaption(() => next.reason === 'activity' ? msg("Moving to a floor with new work", "새 작업이 시작된 층으로") : next.reason === 'fairness' || next.reason === 'quiet' ? msg("Looking around other offices", "다른 사무실도 둘러보는 중") : msg("Looking around the whole office", "사무실 전체를 둘러보는 중"));
     if (cameraScope === 'building' && changedFloor && activeFloors > 1) beginBuildingOverview();
   }
   playHandoffs();
@@ -950,7 +1049,14 @@ function tick() {
   renderEnergy();
   if (panel === 'usage') renderUsage();
   if (!document.hidden && Date.now() - usageLastRequested >= 5000) void refreshUsage();
-  el('cycle-status').textContent = !watch ? '선택한 화면 유지 중' : paused ? '동작 일시정지' : settings.reducedMotion ? '동작 줄이기' : zoomLock ? '확대해서 보는 중' : !candidates.length ? '작업 중인 직원을 기다리는 중' : buildingWide ? '여러 층을 둘러보는 중' : cycleEnabled ? `다음 구역까지 ${Math.max(1, Math.ceil((buildingDirector.nextAt - Date.now()) / 1000))}초` : cameraScope === 'floor' ? '선택한 층 관찰 중' : '일하는 직원 관찰 중';
+  renderCycleStatus();
+}
+
+function renderCycleStatus() {
+  const candidates = patrolRooms();
+  const cameraEnabled = watch && !settings.reducedMotion && !paused && bridgeConnected && !panel && !selectedAgent && !document.hidden;
+  const cycleEnabled = settings.cycle && cameraEnabled && candidates.length > 1;
+  el('cycle-status').textContent = !watch ? msg("Keeping the selected view", "선택한 화면 유지 중") : paused ? msg("Motion paused", "동작 일시정지") : settings.reducedMotion ? msg("Reduced motion", "동작 줄이기") : zoomLock ? msg("Zoomed in", "확대해서 보는 중") : !candidates.length ? msg("Waiting for someone to start work", "작업 중인 직원을 기다리는 중") : buildingWide ? msg("Looking around the floors", "여러 층을 둘러보는 중") : cycleEnabled ? msg("Next workspace in {count}s", "다음 구역까지 {count}초", { count: Math.max(1, Math.ceil((buildingDirector.nextAt - Date.now()) / 1000)) }) : cameraScope === 'floor' ? msg("Observing the selected floor", "선택한 층 관찰 중") : msg("Observing working team members", "일하는 직원 관찰 중");
 }
 
 function renderLocationOnly() { renderNavigation(); }
@@ -1036,7 +1142,7 @@ document.addEventListener('click', event => {
       setWatch(false);
       closeEmployee(); manualUntil = 0; setZoomLock(false);
       frameHandoff({ ...original, id: `${original.id}:replay:${++replaySequence}` }, true);
-      toast('기록된 소통을 다시 보여드려요. 새로운 메시지를 보내지는 않아요.');
+      toast(() => msg("Replaying a recorded exchange. No new message is sent.", "기록된 소통을 다시 보여드려요. 새로운 메시지를 보내지는 않아요."));
     }
   }
   else if (target.dataset.filter) {
@@ -1115,8 +1221,8 @@ el('reset-camera').addEventListener('click', () => { closeEmployee(); scene?.res
 el('orbit').addEventListener('click', () => { settings.autoRotate = !settings.autoRotate; applySettings(true); });
 el('pause').addEventListener('click', () => {
   paused = !paused; communicationTime(); scene?.setPaused(paused || !bridgeConnected);
-  el('pause').innerHTML = `${icon(paused ? 'play' : 'pause')} ${paused ? '직원 동작 다시 재생' : '직원 동작 일시정지'}`;
-  toast(paused ? '화면 동작을 멈췄어요. AI 작업과 기록 수신은 계속돼요.' : '직원 동작을 다시 재생해요.');
+  el('pause').innerHTML = `${icon(paused ? 'play' : 'pause')} ${paused ? msg("Resume team animation", "직원 동작 다시 재생") : msg("Pause team animation", "직원 동작 일시정지")}`;
+  toast(() => paused ? msg("Animation paused. AI work and incoming records continue.", "화면 동작을 멈췄어요. AI 작업과 기록 수신은 계속돼요.") : msg("Team animation resumed.", "직원 동작을 다시 재생해요."));
 });
 for (const key of ['labels', 'bubbles', 'autoRotate', 'followWork', 'cycle', 'powerSaving', 'reducedMotion'] as const) el(`setting-${key}`).addEventListener('change', () => {
   settings[key] = el<HTMLInputElement>(`setting-${key}`).checked;
@@ -1153,13 +1259,13 @@ el('scene').addEventListener('keydown', event => {
 el('scene').addEventListener('keydown', event => { if (event !== floorStepEvent && ['ArrowLeft','ArrowRight','ArrowUp','ArrowDown','Home','PageUp','PageDown','+','-','=','_'].includes(event.key)) manualCamera(true); });
 el('fullscreen').addEventListener('click', async () => {
   try { if (document.fullscreenElement) await document.exitFullscreen(); else await el('game').requestFullscreen(); }
-  catch { toast('이 브라우저에서는 전체 화면 버튼을 사용할 수 없어요. 창을 직접 확대해주세요.'); }
+  catch { toast(() => msg("Fullscreen is unavailable in this browser. Enlarge the window instead.", "이 브라우저에서는 전체 화면 버튼을 사용할 수 없어요. 창을 직접 확대해주세요.")); }
 });
-document.addEventListener('fullscreenchange', () => el('fullscreen').setAttribute('aria-label', document.fullscreenElement ? '전체 화면 나가기' : '전체 화면'));
+document.addEventListener('fullscreenchange', () => el('fullscreen').setAttribute('aria-label', document.fullscreenElement ? msg("Exit fullscreen", "전체 화면 나가기") : msg("Fullscreen", "전체 화면")));
 el('open-window').addEventListener('click', () => {
   const opened = window.open('/', 'agent-office-watch', 'popup,width=960,height=720');
-  if (!opened) toast('독립 창을 열지 못했어요. 이 사이트의 팝업을 허용해주세요.');
-  else { opened.opener = null; closePanel(); toast('관찰용 독립 창을 열었어요. 옆 모니터로 옮겨주세요.'); }
+  if (!opened) toast(() => msg("Could not open a separate window. Allow pop-ups for this site.", "독립 창을 열지 못했어요. 이 사이트의 팝업을 허용해주세요."));
+  else { opened.opener = null; closePanel(); toast(() => msg("Opened an observation window. Move it to another monitor.", "관찰용 독립 창을 열었어요. 옆 모니터로 옮겨주세요.")); }
 });
 document.addEventListener('keydown', event => {
   if ((event.target as HTMLElement).closest('input,select,textarea,[contenteditable="true"]') || event.metaKey || event.ctrlKey || event.altKey) return;
@@ -1184,7 +1290,7 @@ function ingest(entry: OfficeEvent, animate = true) {
   if (animate && !document.hidden) {
     renderAll();
     playHandoffs();
-    if (entry.type === 'approval.requested') { scene?.requestApproval(entry.agentId); toast(`${entry.agentName ?? '직원'}의 확인 요청이 도착했어요.`); }
+    if (entry.type === 'approval.requested') { scene?.requestApproval(entry.agentId); toast(() => msg("Approval requested by {name}.", "{name}의 확인 요청이 도착했어요.", { name: entry.agentName ?? msg("A team member", "직원") })); }
     // The owner files a finished visit (up to 1.5s wait and a 1.6s gesture), which the first crane must not cut.
     if (entry.type === 'approval.resolved') { scene?.resolveApproval(entry.agentId); markSceneBusy(3200); }
   } else queueRender();
@@ -1240,7 +1346,7 @@ stream.onmessage = event => {
     if (hydrationRequired) { hydrationReplay.push(entry); if (hydrationReplay.length > 1000) hydrationReplay.shift(); }
     if (!stateLoaded) { pending.push(entry); if (pending.length > 1000) pending.shift(); } else ingest(entry);
   }
-  catch { toast('읽을 수 없는 작업 소식을 건너뛰었어요.'); }
+  catch { toast(() => msg("Skipped an unreadable work update.", "읽을 수 없는 작업 소식을 건너뛰었어요.")); }
 };
 async function hydrate() {
   if (disposed || hydrationRunning) return;
@@ -1306,7 +1412,7 @@ async function hydrateCompany() {
 }
 el('company-form').addEventListener('input', () => {
   companyFormDirty = true;
-  el('company-save-status').textContent = '';
+  companyStatusMessage = undefined; el('company-save-status').textContent = '';
 });
 el('company-form').addEventListener('submit', async event => {
   event.preventDefault();
@@ -1316,22 +1422,23 @@ el('company-form').addEventListener('submit', async event => {
     const value = el<HTMLInputElement>(id).value;
     if (value !== companySettings[key]) patch[key] = value;
   }
-  if (!Object.keys(patch).length) { el('company-save-status').textContent = '이미 저장된 이름이에요.'; return; }
+  if (!Object.keys(patch).length) { companyStatusMessage = () => msg("These names are already saved.", "이미 저장된 이름이에요."); el('company-save-status').textContent = companyStatusMessage(); return; }
   companySaving = true;
   companyRevision++;
   const controls = ['company-name', 'owner-name', 'save-company'].map(id => el<HTMLInputElement | HTMLButtonElement>(id));
   for (const control of controls) control.disabled = true;
   const status = el('company-save-status');
-  status.textContent = '저장 중…'; status.classList.remove('error');
+  companyStatusMessage = () => msg("Saving…", "저장 중…"); status.textContent = companyStatusMessage(); status.classList.remove('error');
   try {
     const saved = await saveCompanySettings(patch);
     if (disposed) return;
     applyCompanySettings(saved); syncCompanyForm(); companyFormDirty = false;
-    status.textContent = '명찰과 간판에 반영했어요.';
+    companyStatusMessage = () => msg("Updated the nameplates and signs.", "명찰과 간판에 반영했어요."); status.textContent = companyStatusMessage();
   } catch (error) {
     if (!disposed) {
-      status.textContent = error instanceof Error && !(error instanceof TypeError) && error.name !== 'AbortError'
-        ? error.message : '로컬 사무실에 연결하지 못했어요. 다시 시도해주세요.';
+      companyStatusMessage = () => error instanceof Error && !(error instanceof TypeError) && error.name !== 'AbortError'
+        ? companySettingsErrorMessage(error) : msg("Could not connect to the local office. Try again.", "로컬 사무실에 연결하지 못했어요. 다시 시도해주세요.");
+      status.textContent = companyStatusMessage();
       status.classList.add('error');
     }
   } finally {
@@ -1339,7 +1446,7 @@ el('company-form').addEventListener('submit', async event => {
     for (const control of controls) control.disabled = false;
   }
 });
-applySettings(); setWatch(watch); renderAll(); renderConnection(); void hydrate(); void hydrateCompany(); void refreshUsage(); tick();
+notifyNativeLanguage(); applySettings(); setWatch(watch); renderAll(); renderConnection(); void hydrate(); void hydrateCompany(); void refreshUsage(); tick();
 const clockTimer = setInterval(tick, 1000);
 window.addEventListener('pagehide', () => {
   disposed = true; clearHydrationRetry(); hydrationController?.abort(); pending.length = 0; hydrationReplay.length = 0;

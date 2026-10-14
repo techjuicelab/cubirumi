@@ -1,3 +1,5 @@
+import { setLanguage } from '../src/i18n.ts';
+setLanguage('ko');
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import { appearanceFor, BOSS_SHIRT, SEAT_LOOKS } from '../src/appearance.ts';

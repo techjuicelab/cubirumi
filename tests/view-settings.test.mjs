@@ -100,3 +100,29 @@ test('the building shows at most eight floors by default, and only the offered f
   assert.equal(saveViewSettings(storage, settings), true);
   assert.equal(readViewSettings(storage).maxFloors, 0, 'choosing no floor limit survives a reload');
 });
+
+test('the office defaults to English and only accepts a supported display language', () => {
+  assert.equal(normalizeViewSettings(null).language, 'en');
+  assert.equal(normalizeViewSettings({ language: 'ko' }).language, 'ko');
+  assert.equal(normalizeViewSettings({ language: 'en' }).language, 'en');
+  for (const invalid of [undefined, null, '', 'KO', 'ko-KR', 'system', false, 1, {}, ['ko']]) {
+    assert.equal(normalizeViewSettings({ language: invalid }).language, 'en');
+  }
+});
+
+test('language choices survive reloads while legacy display preferences stay intact', () => {
+  let stored = JSON.stringify({ labels: false, powerSaving: false, cycleSeconds: 45, dormantFloorMinutes: 180, maxFloors: 6 });
+  const storage = { getItem() { return stored; }, setItem(_key, value) { stored = value; } };
+  const settings = readViewSettings(storage, true);
+  assert.equal(settings.language, 'en', 'older settings gain English without inferring a device language');
+  settings.language = 'ko';
+  assert.equal(saveViewSettings(storage, settings), true);
+  const reopened = readViewSettings(storage, false);
+  assert.equal(reopened.language, 'ko');
+  assert.equal(reopened.labels, false);
+  assert.equal(reopened.powerSaving, false);
+  assert.equal(reopened.cycleSeconds, 45);
+  assert.equal(reopened.dormantFloorMinutes, 180);
+  assert.equal(reopened.maxFloors, 6);
+  assert.equal(reopened.reducedMotion, false, 'the OS motion preference still follows the current device');
+});

@@ -379,10 +379,10 @@ test('Claude cards focus Claude details and local refresh preserves stale eviden
   assert.equal(ui.get('watch-toggle').getAttribute('aria-pressed'), 'false');
 });
 
-async function mountOffice(t, { url = 'http://127.0.0.1:4780/', states, savedSettings,
+async function mountOffice(t, { url = 'http://127.0.0.1:4780/', states, savedSettings, testLanguage = 'ko', nativeLanguage,
   autoConnect = true, stateError = false, initiallyHidden = false, usage = { providers: [] }, usageFailsAfter = Infinity,
   personalSettings = { companyName: '테스트 사무실', ownerName: '예시 사장' }, settingsSaveError = false, systemReducedMotion = false,
-  instructionPlanes = false, buildingIntro = '', stateFetch, fakeTimers = false } = {}) {
+  instructionPlanes = false, buildingIntro = '', sceneFails = false, stateFetch, fakeTimers = false } = {}) {
   const window = new Window({ url });
   const motionPreference = new window.EventTarget();
   motionPreference.matches = systemReducedMotion;
@@ -391,7 +391,10 @@ async function mountOffice(t, { url = 'http://127.0.0.1:4780/', states, savedSet
     Object.defineProperty(window.document, 'visibilityState', { configurable: true, value: 'hidden' });
   }
   window.document.body.innerHTML = '<div id="app"></div>';
-  if (savedSettings) window.localStorage.setItem('agent-office.view.v1', JSON.stringify(savedSettings));
+  if (testLanguage !== null || savedSettings) window.localStorage.setItem('agent-office.view.v1', JSON.stringify({ ...(testLanguage === null ? {} : { language: testLanguage }), ...savedSettings }));
+  if (nativeLanguage) window.cubirumiInitialLanguage = nativeLanguage;
+  const nativeMessages = [];
+  window.webkit = { messageHandlers: { officeLanguage: { postMessage: language => nativeMessages.push(language) } } };
   const directory = await mkdtemp(join(tmpdir(), 'agent-office-ui-'));
   const calls = [];
   const frames = [];
@@ -408,7 +411,7 @@ async function mountOffice(t, { url = 'http://127.0.0.1:4780/', states, savedSet
   const snapshots = states ?? [{ agents: initialSnapshots(), events: [] }];
 
   class OfficeScene {
-    constructor(element, select, selectFloor) { this.element = element; this.select = select; this.selectFloor = selectFloor; scene = this; }
+    constructor(element, select, selectFloor) { if (sceneFails) throw new Error('WebGL unavailable'); this.element = element; this.select = select; this.selectFloor = selectFloor; scene = this; }
     setAgents(agents) { this.agents = agents.map(agent => ({ ...agent })); }
     setBuildingFloors(floors) { this.buildingFloors = floors.map(floor => ({ ...floor, agents: floor.agents.map(agent => ({ ...agent })) })); }
     setBuildingView(enabled, projectId = '') {
@@ -445,6 +448,7 @@ async function mountOffice(t, { url = 'http://127.0.0.1:4780/', states, savedSet
     stamp(id) { calls.push(['stamp', id]); }
     // Kept out of `calls` so existing "last camera call" assertions keep their meaning.
     setCardOpen(id) { this.cardOpen = id; this.cardOpenHistory = [...(this.cardOpenHistory ?? []), id]; }
+    refreshLanguage() { this.languageRefreshes = (this.languageRefreshes ?? 0) + 1; }
     setOwnerNames(names) { this.ownerNames = { ...names }; }
     setBridgeConnected(value) { this.bridgeHistory = [...(this.bridgeHistory ?? []), value]; }
     pulseRouter() { this.routerPulses = (this.routerPulses ?? 0) + 1; }
@@ -539,7 +543,7 @@ async function mountOffice(t, { url = 'http://127.0.0.1:4780/', states, savedSet
 
   // TypeScript 7 does not expose transpileModule; the project's Node baseline can
   // strip these erasable types. Imports retain the production module boundaries.
-  for (const name of ['main', 'shell', 'company-settings', 'protocol', 'status-style', 'work-activity', 'activity-freshness', 'appearance', 'portrait', 'office-state', 'observation', 'view-settings', 'camera-director', 'building-director', 'handoff-playback', 'usage-view', 'usage-ui']) {
+  for (const name of ['main', 'i18n', 'shell', 'company-settings', 'protocol', 'status-style', 'work-activity', 'activity-freshness', 'appearance', 'portrait', 'office-state', 'observation', 'view-settings', 'camera-director', 'building-director', 'handoff-playback', 'event-label', 'usage-view', 'usage-ui']) {
     const source = await readFile(new URL(`${name}.ts`, sourceRoot), 'utf8');
     const code = stripTypeScriptTypes(source, { mode: 'strip' })
       .replace(/^import\s+['"][^'"]+\.css['"];\s*/gmu, '')
@@ -562,7 +566,7 @@ async function mountOffice(t, { url = 'http://127.0.0.1:4780/', states, savedSet
   assert.equal(source.path, '/api/events');
   if (autoConnect) { source.open(); await flush(); }
   return {
-    window, document: window.document, scene, source, calls, requests, settingsWrites, flush,
+    window, document: window.document, scene, source, calls, requests, settingsWrites, nativeMessages, flush,
     setSystemReducedMotion: async value => { motionPreference.matches = value; motionPreference.dispatchEvent(new window.Event('change')); await flush(); },
     get stateRequests() { return stateRequests; },
     get: id => window.document.getElementById(id),
@@ -1914,7 +1918,7 @@ test('the work section shows an external call, and approval and error guidance, 
   for (const [index, [status, shape, note]] of cases.entries()) {
     await ui.emit(snapshot({ id: `card-${status}`, status, timestamp: `2026-01-01T10:0${index + 1}:00.000Z` }));
     const chip = detail.querySelector('.status-chip');
-    assert.equal(chip.textContent, STATUS_STYLE[status].label);
+    assert.equal(chip.textContent, { error: '오류', approval: '확인 요청', done: '응답 종료', thinking: '처리 중' }[status]);
     assert.equal(chip.querySelector('.status-shape').dataset.shape, shape);
     assert.match(chip.getAttribute('style'), new RegExp(STATUS_STYLE[status].color, 'u'));
     if (note) assert.match(detail.querySelector('.card-note').textContent, note);
@@ -2530,4 +2534,168 @@ test('a report from a resting floor brings it back in place of the floor quiet t
   }
   assert.equal(shownFloors(ui).length, 9, 'nine floors with work are all shown past the limit of eight');
   assert.equal(ui.get('dormant-floors') === null, true);
+});
+
+
+const chooseLanguage = async (ui, language) => {
+  const select = ui.get('setting-language');
+  select.value = language;
+  select.dispatchEvent(new ui.window.Event('change', { bubbles: true }));
+  await ui.flush();
+};
+
+test('a first visit starts in English and keeps reported Korean names and records intact', async t => {
+  const ui = await mountOffice(t, { testLanguage: null, states: [{ agents: [snapshot()], events: [snapshot({ type: 'message.sent', title: '사용자가 작성한 한글 기록' })] }] });
+  assert.equal(ui.document.documentElement.lang, 'en');
+  assert.equal(ui.get('setting-language').value, 'en');
+  assert.equal(ui.get('connection-label').textContent, 'Receiving live');
+  assert.equal(ui.get('location-mode').textContent, 'View whole building');
+  assert.equal(ui.get('room-title').textContent, '실제 프로젝트');
+  assert.match(ui.get('dispatch-text').textContent, /사용자가 작성한 한글 기록/u);
+  ui.click('[data-open="settings"]');
+  assert.equal(ui.get('panel-title').textContent, 'Office settings');
+  assert.equal(ui.get('company-name').value, '테스트 사무실');
+  assert.equal(ui.get('owner-name').value, '예시 사장');
+  assert.deepEqual(ui.nativeMessages, ['en']);
+});
+
+test('switching languages updates open settings in place and preserves drafts, settings and the chosen camera view', async t => {
+  const ui = await mountOffice(t, { testLanguage: null, savedSettings: { labels: false, cycleSeconds: 45 } });
+  ui.click('[data-floor="project-idle"]'); ui.click('#zoom-in');
+  const sceneElement = ui.get('scene');
+  const zoom = ui.scene.zoomLevel;
+  ui.click('[data-open="settings"]');
+  const dialog = ui.get('office-panel'), input = ui.get('company-name'), select = ui.get('setting-language');
+  input.value = '저장 전 한글 회사 초안';
+  input.dispatchEvent(new ui.window.Event('input', { bubbles: true }));
+  input.setSelectionRange(1, 5);
+  await chooseLanguage(ui, 'ko');
+  assert.equal(ui.document.documentElement.lang, 'ko');
+  assert.equal(ui.get('panel-title').textContent, '사무실 설정');
+  assert.equal(ui.get('connection-label').textContent, '실시간 수신');
+  assert.equal(ui.get('scene') === sceneElement, true, 'the scene element is retained');
+  assert.equal(ui.get('office-panel') === dialog, true, 'the open dialog is retained');
+  assert.equal(dialog.open, true);
+  assert.equal(ui.get('company-name') === input, true, 'the draft field and its selection are retained');
+  assert.equal(input.value, '저장 전 한글 회사 초안');
+  assert.deepEqual([input.selectionStart, input.selectionEnd], [1, 5]);
+  assert.equal(ui.get('setting-language') === select, true, 'the language selector keeps its listener');
+  assert.equal(ui.get('room-title').textContent, '대기 프로젝트');
+  assert.equal(ui.scene.zoomLevel, zoom);
+  assert.equal(ui.scene.labels, false);
+  assert.equal(ui.get('setting-cycleSeconds').value, '45');
+  assert.equal(ui.scene.languageRefreshes, 1);
+  assert.deepEqual(ui.nativeMessages, ['en', 'ko']);
+  assert.deepEqual(ui.settingsWrites, [], 'language changes do not write company or owner names');
+  assert.equal(JSON.parse(ui.window.localStorage.getItem('agent-office.view.v1')).language, 'ko');
+  await chooseLanguage(ui, 'en');
+  assert.equal(ui.get('panel-title').textContent, 'Office settings');
+  assert.equal(ui.get('connection-label').textContent, 'Receiving live');
+  assert.equal(input.value, '저장 전 한글 회사 초안');
+  assert.equal(ui.scene.zoomLevel, zoom);
+});
+
+test('language selection survives a new page while retaining other view preferences', async t => {
+  let saved;
+  await t.test('save the chosen language', async t => {
+    const ui = await mountOffice(t, { testLanguage: null, savedSettings: { labels: false, maxFloors: 4, powerSaving: true } });
+    await chooseLanguage(ui, 'ko');
+    saved = JSON.parse(ui.window.localStorage.getItem('agent-office.view.v1'));
+    assert.equal(saved.language, 'ko');
+  });
+  await t.test('read the same preference on relaunch', async t => {
+    const ui = await mountOffice(t, { testLanguage: null, savedSettings: saved });
+    assert.equal(ui.document.documentElement.lang, 'ko');
+    assert.equal(ui.get('connection-label').textContent, '실시간 수신');
+    assert.equal(ui.scene.labels, false);
+    assert.equal(ui.scene.powerSaving, true);
+    assert.equal(ui.get('setting-maxFloors').value, '4');
+  });
+});
+
+test('storage and native language updates keep open cards and filters and avoid native echo loops', async t => {
+  const ui = await mountOffice(t, { testLanguage: null });
+  ui.click('[data-open="team"]'); ui.click('[data-roster-filter="all"]'); ui.click('#close-panel');
+  ui.scene.select('worker-live');
+  const snapshotBefore = JSON.stringify(ui.scene.agents);
+  const stored = JSON.stringify({ language: 'ko', labels: true });
+  ui.window.localStorage.setItem('agent-office.view.v1', stored);
+  ui.window.dispatchEvent(new ui.window.StorageEvent('storage', { key: 'agent-office.view.v1', newValue: stored, storageArea: ui.window.localStorage }));
+  await ui.flush();
+  assert.equal(ui.document.documentElement.lang, 'ko');
+  assert.equal(ui.get('employee-card').hidden, false);
+  assert.match(ui.get('employee-detail').textContent, /지금 하는 일/u);
+  assert.equal(JSON.stringify(ui.scene.agents), snapshotBefore, 'reported employee data is preserved');
+  const notifications = ui.nativeMessages.length;
+  ui.window.cubirumiSetLanguage('en'); await ui.flush();
+  assert.equal(ui.get('employee-card').hidden, false);
+  assert.match(ui.get('employee-detail').textContent, /Current work/u);
+  assert.equal(ui.get('employee-card-title').textContent, '연결된 직원');
+  assert.equal(ui.nativeMessages.length, notifications, 'native callbacks are not echoed back to native windows');
+  ui.window.cubirumiSetLanguage('en'); await ui.flush();
+  assert.equal(ui.nativeMessages.length, notifications);
+  ui.click('#close-employee'); ui.click('[data-open="team"]');
+  assert.equal(ui.document.querySelector('[data-roster-filter="all"]').getAttribute('aria-pressed'), 'true');
+  assert.equal(ui.get('roster').querySelectorAll('[data-agent]').length, 2);
+});
+
+test('native preference is a fallback and an explicit saved browser choice takes priority', async t => {
+  await t.test('a new native web view adopts the native preference', async t => {
+    const ui = await mountOffice(t, { testLanguage: null, nativeLanguage: 'ko' });
+    assert.equal(ui.document.documentElement.lang, 'ko');
+    assert.deepEqual(ui.nativeMessages, ['ko']);
+  });
+  await t.test('a saved English choice wins over a native fallback', async t => {
+    const ui = await mountOffice(t, { testLanguage: null, nativeLanguage: 'ko', savedSettings: { language: 'en' } });
+    assert.equal(ui.document.documentElement.lang, 'en');
+    assert.deepEqual(ui.nativeMessages, ['en']);
+  });
+});
+
+
+test('changing language refreshes an existing settings save error while preserving the draft', async t => {
+  const ui = await mountOffice(t, { testLanguage: null, settingsSaveError: true });
+  ui.click('[data-open="settings"]');
+  const field = ui.get('owner-name');
+  field.value = '수정 전 보존 이름'; field.dispatchEvent(new ui.window.Event('input', { bubbles: true }));
+  ui.get('company-form').dispatchEvent(new ui.window.Event('submit', { bubbles: true, cancelable: true }));
+  await ui.flush();
+  assert.match(ui.get('company-save-status').textContent, /Could not save settings/u);
+  await chooseLanguage(ui, 'ko');
+  assert.match(ui.get('company-save-status').textContent, /설정을 저장하지 못했습니다/u);
+  assert.equal(field.value, '수정 전 보존 이름');
+  assert.equal(ui.get('company-save-status').classList.contains('error'), true);
+});
+
+test('the fallback view stays usable and follows language changes when WebGL initialization fails', async t => {
+  const originalError = console.error;
+  console.error = () => {};
+  let ui;
+  try { ui = await mountOffice(t, { testLanguage: null, sceneFails: true }); }
+  finally { console.error = originalError; }
+  assert.match(ui.get('scene').textContent, /Could not open the 3D view/u);
+  ui.click('[data-open="settings"]');
+  await chooseLanguage(ui, 'ko');
+  assert.match(ui.get('scene').textContent, /3D 화면을 열지 못했어요/u);
+  assert.equal(ui.get('office-panel').open, true);
+  assert.equal(ui.get('panel-title').textContent, '사무실 설정');
+});
+
+
+test('only exact adapter-generated role labels from a known hook are localized', async t => {
+  const ui = await mountOffice(t, { testLanguage: null });
+  ui.scene.select('worker-live');
+  for (const [role, observation, expected] of [['리서치', 'hook', 'Research'], ['기획', 'hook', 'Planning'], ['검토', 'hook', 'Review'], ['리서치', 'manual', '리서치'], ['리서치 전문가', 'hook', '리서치 전문가']]) {
+    await ui.emit(snapshot({ id: `role-${expected}`, role, observation, timestamp: new Date(Date.now()).toISOString() }));
+    assert.equal(ui.get('employee-detail').querySelector('.rank-badge').textContent, expected);
+  }
+});
+
+test('generic observer tool labels are translated without changing custom tool names', async t => {
+  const ui = await mountOffice(t, { testLanguage: null });
+  ui.scene.select('worker-live');
+  for (const [toolName, observation, expected] of [['MCP 도구', 'codex-log', 'MCP tool'], ['도구', 'hook', 'Tool'], ['도구', 'manual', '도구'], ['나의 도구', 'hook', '나의 도구']]) {
+    await ui.emit(snapshot({ id: `tool-label-${expected}`, toolName, observation, timestamp: new Date(Date.now()).toISOString() }));
+    assert.equal(ui.get('employee-detail').querySelector('.tool-chip').textContent, expected);
+  }
 });

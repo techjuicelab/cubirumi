@@ -1,3 +1,5 @@
+import { setLanguage } from '../src/i18n.ts';
+setLanguage('ko');
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import * as THREE from 'three';
@@ -40,6 +42,23 @@ const project = (id, count, extra = {}) => ({ id, name: id, agents: roster(id, c
 const byName = (overview, name) => overview.shell.children.find(object => object.name === name);
 const hex = (mesh, index) => mesh.getColorAt(index, new THREE.Color()).getHexString();
 const matrices = mesh => Array.from(mesh.instanceMatrix.array);
+
+test('building counts and cached floor rail accessibility labels follow a language change with unchanged floors', t => {
+  t.after(() => setLanguage('ko'));
+  const { overview, container } = fixture(t);
+  const inputs = Array.from({ length: 12 }, (_, i) => project(`사용자 층 ${i}`, 1));
+  overview.setFloors(inputs);
+  const first = container.querySelector('.building-floor-label');
+  const rail = overview.rail;
+  assert.match(first.textContent, /작업 1/);
+  assert.equal(rail.getAttribute('aria-label'), '층 목록');
+  setLanguage('en'); overview.setFloors(inputs);
+  assert.equal(container.querySelector('.building-floor-label') === first, true);
+  assert.match(first.textContent, /Working 1/);
+  assert.equal(rail.getAttribute('aria-label'), 'Floors');
+  assert.match(overview.railItems.get(inputs[0].id).button.getAttribute('aria-label'), /Floor 1 사용자 층 0/);
+  assert.match(overview.railItems.get(inputs[0].id).button.getAttribute('aria-label'), /Working: 1/);
+});
 function instanceBox(mesh, index) {
   const matrix = new THREE.Matrix4(); mesh.getMatrixAt(index, matrix);
   return new THREE.Box3(new THREE.Vector3(-.5, -.5, -.5), new THREE.Vector3(.5, .5, .5)).applyMatrix4(matrix);

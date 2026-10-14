@@ -115,9 +115,9 @@ export function cctvCandidates(agents: readonly Agent[], { pageSize = 5 }: { pag
     const ordered = room.agents;
     const pageCount = Math.ceil(ordered.length / size);
     const projectName = room.agents.find(agent => agent.projectName?.trim())?.projectName?.trim()
-      ?? (room.projectId === UNKNOWN_PROJECT ? '프로젝트 미확인' : '이름 없는 프로젝트');
+      ?? (room.projectId === UNKNOWN_PROJECT ? msg('Unknown project', '프로젝트 미확인') : msg('Unnamed project', '이름 없는 프로젝트'));
     const sessionName = room.agents.find(agent => agent.sessionName?.trim())?.sessionName?.trim()
-      ?? (room.sessionId === UNKNOWN_SESSION ? '채팅방 미확인' : '이름 없는 채팅방');
+      ?? (room.sessionId === UNKNOWN_SESSION ? msg('Unknown chat', '채팅방 미확인') : msg('Unnamed chat', '이름 없는 채팅방'));
     for (let page = 0; page < pageCount; page++) {
       const visible = ordered.slice(page * size, (page + 1) * size);
       candidates.push({ key: JSON.stringify([room.projectId, room.sessionId, page]),
@@ -168,7 +168,7 @@ export function modelActivity(agents: readonly Agent[], events: readonly Observa
     const key = model ? `model:${model}` : UNKNOWN_MODEL;
     let item = buckets.get(key);
     if (!item) {
-      item = { key, ...(model ? { model } : {}), label: model ?? '모델 미확인',
+      item = { key, ...(model ? { model } : {}), label: model ?? msg('Unknown model', '모델 미확인'),
         modelEvidence: model ? 'reported' : 'unknown', connectedCount: 0, workingCount: 0,
         toolStarts: 0, handoffs: 0, responsesEnded: 0, observedEvents: 0 };
       buckets.set(key, item);
@@ -200,3 +200,4 @@ export function modelActivity(agents: readonly Agent[], events: readonly Observa
     return a.label.localeCompare(b.label);
   });
 }
+import { msg } from './i18n.ts';

@@ -1,3 +1,5 @@
+import { setLanguage } from '../src/i18n.ts';
+setLanguage('ko');
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import * as THREE from 'three';
@@ -1993,6 +1995,26 @@ test('a company-wide approval count sets the owner tray over seated requests and
   scene.setApprovalCount(Number.NaN); scene.setApprovalCount(-2);
   assert.equal(writes, 0, 'an invalid count is ignored and a negative one clamps to the same zero');
   assert.deepEqual(sceneResources(scene), quiet, 'a changing count builds no geometry, material or texture');
+});
+
+test('language changes repaint generated sign suffixes and accessible scene text while retaining names and camera', t => {
+  t.after(() => setLanguage('ko'));
+  const scene = actualGeometryFixture(t, { canvas: true });
+  const attributes = {};
+  scene.setAgents([agent('boss')]);
+  scene.renderer = { domElement: { setAttribute: (name, value) => { attributes[name] = value; } } };
+  scene.container.dataset = { paperFlights: '0' };
+  scene.setOwnerNames({ companyName: '사용자 회사', ownerName: '김하나' });
+  const camera = scene.camera;
+  setLanguage('en'); scene.refreshLanguage();
+  assert.equal(scene.world.getObjectByName('owner-sign-lettering').userData.lettering, '사용자 회사 Office');
+  assert.equal(scene.world.getObjectByName('owner-nameplate-lettering').userData.lettering, '김하나 Owner');
+  assert.match(attributes['aria-label'], /^3D office/);
+  assert.equal(scene.camera === camera, true);
+  assert.equal(scene.container.dataset.paperFlights, undefined, 'the next frame updates the flight description in the new language');
+  setLanguage('ko'); scene.refreshLanguage();
+  assert.equal(scene.world.getObjectByName('owner-sign-lettering').userData.lettering, '사용자 회사 대표실');
+  assert.match(attributes['aria-label'], /^3D 사무실/);
 });
 
 test('settings names redraw only a changed sign or nameplate texture, keep the suffix whole and reach the building roof sign', t => {

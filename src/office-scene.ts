@@ -17,8 +17,13 @@ import { isWorkingStatus } from './work-activity.ts';
 import type { ActivityKind } from './protocol.ts';
 import { appearanceFor, appearanceKey, type Appearance } from './appearance.ts';
 import { STATUS_STYLE, isExternalCall, statusStyleFor } from './status-style.ts';
+import { msg } from './i18n.ts';
 
 type AgentInput = { id: string; status: string; task?: string; taskId?: string; toolName?: string; activityKind?: ActivityKind; color?: string; name?: string; model?: string; modelEvidence?: string; showCharacter?: boolean };
+const sceneDescription = (): string => msg(
+  '3D office. Drag or use arrow keys to rotate, scroll or use plus and minus to zoom, right-drag or Shift-drag to pan, and Home to reset. Click a worker for details.',
+  '3D 사무실. 드래그와 방향키로 회전, 휠과 더하기·빼기로 확대, 우클릭 또는 Shift 드래그로 이동, Home으로 처음 보기. 직원을 클릭하면 자세히 볼 수 있습니다.',
+);
 /** HUD blocks around the stage, in CSS pixels from each edge. */
 export type HudInsets = { top: number; right: number; bottom: number; left: number };
 /**
@@ -204,8 +209,8 @@ const smoothstep01 = (value: number): number => {
 };
 /** Settings-driven lettering: the office sign '{company} 대표실' and the desk nameplate '{owner} 대표'. */
 const LETTERING = {
-  sign: { width: 768, height: 116, font: 50, padding: 40, background: '#91aba9', color: '#f5f9fb', suffix: '대표실' },
-  nameplate: { width: 384, height: 84, font: 42, padding: 16, background: PALETTE.dark, color: PALETTE.white, suffix: '대표' },
+  sign: { width: 768, height: 116, font: 50, padding: 40, background: '#91aba9', color: '#f5f9fb', get suffix() { return msg('Office', '대표실'); } },
+  nameplate: { width: 384, height: 84, font: 42, padding: 16, background: PALETTE.dark, color: PALETTE.white, get suffix() { return msg('Owner', '대표'); } },
 } as const;
 const windowScratch = new THREE.Color();
 const shadeScratch = new THREE.Color();
@@ -379,7 +384,7 @@ export class OfficeScene {
     this.renderer.outputColorSpace = THREE.SRGBColorSpace;
     this.renderer.toneMapping = THREE.ACESFilmicToneMapping;
     this.renderer.toneMappingExposure = 1.28;
-    this.renderer.domElement.setAttribute('aria-label', '3D 사무실. 드래그와 방향키로 회전, 휠과 더하기·빼기로 확대, 우클릭 또는 Shift 드래그로 이동, Home으로 처음 보기. 직원을 클릭하면 자세히 볼 수 있습니다.');
+    this.renderer.domElement.setAttribute('aria-label', sceneDescription());
     this.renderer.domElement.setAttribute('role', 'img');
     this.renderer.domElement.tabIndex = 0;
     this.renderer.domElement.style.touchAction = 'none';
@@ -551,7 +556,7 @@ export class OfficeScene {
       figure.halo.visible = figure.group.visible && !this.cardHidesMarkers(figure);
       figure.label.style.display = this.showAgentName(figure) ? 'flex' : 'none';
       const name = figure.label.querySelector('span:last-child');
-      const nameText = `${agent.name ?? agent.id}${agent.id === 'boss' ? '' : ` · ${agent.modelEvidence === 'reported' && agent.model ? agent.model : '모델 미확인'}`}`;
+      const nameText = `${agent.name ?? agent.id}${agent.id === 'boss' ? '' : ` · ${agent.modelEvidence === 'reported' && agent.model ? agent.model : msg('Unknown model', '모델 미확인')}`}`;
       if (name) name.textContent = nameText;
       figure.nameWidth = activityBubbleWidth(nameText, false) + 8;
       // The owner's navy turtleneck is part of the owner's look; employees wear their reported model color.
@@ -756,6 +761,14 @@ export class OfficeScene {
     if (next.companyName !== current.companyName) this.paintLettering('sign');
     if (next.ownerName !== current.ownerName) this.paintLettering('nameplate');
     if (first || next.companyName !== current.companyName) this.building?.setCompanyName?.(next.companyName);
+  }
+
+  /** Repaint generated lettering and accessibility text without replacing the scene or its camera. */
+  refreshLanguage(): void {
+    this.paintLettering('sign');
+    this.paintLettering('nameplate');
+    this.renderer.domElement.setAttribute('aria-label', sceneDescription());
+    delete this.container.dataset.paperFlights;
   }
 
   /** Router LED: green while the bridge is connected, amber when it is not, and two green blinks on reconnection. */
@@ -2006,7 +2019,7 @@ export class OfficeScene {
     const labelDot = document.createElement('span');
     Object.assign(labelDot.style, { width: '5px', height: '5px', borderRadius: '50%', background: quiet });
     const labelName = document.createElement('span');
-    labelName.textContent = ['사장님', '모아', '노바', '루미', '코디', '체키'][index] ?? seat.id;
+    labelName.textContent = [msg('Owner', '사장님'), msg('Moa', '모아'), msg('Nova', '노바'), msg('Lumi', '루미'), msg('Codi', '코디'), msg('Checky', '체키')][index] ?? seat.id;
     label.append(labelDot, labelName);
     this.container.append(label);
     const bubble = document.createElement('div');
@@ -3600,7 +3613,7 @@ export class OfficeScene {
     const flightCount = this.buildingView ? this.building?.activeFlightCount ?? 0 : this.paperFlights.length;
     if (this.container.dataset.paperFlights !== String(flightCount)) {
       this.container.dataset.paperFlights = String(flightCount);
-      this.renderer.domElement.setAttribute?.('aria-description', `현재 컴퓨터 사이를 이동 중인 종이비행기 ${flightCount}개`);
+      this.renderer.domElement.setAttribute?.('aria-description', msg('Paper planes flying between computers: {count}', '현재 컴퓨터 사이를 이동 중인 종이비행기 {count}개', { count: flightCount }));
     }
     this.renderer.render(this.scene, this.camera);
     this.container.dataset.drawCalls = String(this.renderer.info.render.calls);
