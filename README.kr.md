@@ -16,6 +16,8 @@ macOS 13.5 이상 · Apple Silicon / Intel · MIT 오픈소스
 
 앱의 기본 언어는 영어입니다. **Settings → Language → 한국어**에서 한국어로 바꿀 수 있고, **설정 → 언어 → English**에서 영어로 돌아갈 수 있습니다. 선택은 이 기기에 저장되며 macOS 메뉴에도 바로 반영됩니다. 회사명·프로젝트명·기록의 원문은 유지됩니다. 기본 README는 영어로, 이 문서는 한국어로 제공합니다.
 
+**v0.3.2의 새 기능:** 영어·한국어 지원, 활동 관측 안정성 개선, 전체 화면·독립 관찰 창 오류 수정. [릴리스 안내](docs/releases/v0.3.2.md)
+
 <p align="center">
   <img src="design/previews/office-team.png" alt="Claude Code 직원 세 명이 각자의 책상에서 일하며 모델 이름과 업무 상태를 표시하는 실제 사용 화면" width="720">
 </p>

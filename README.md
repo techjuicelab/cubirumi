@@ -16,6 +16,8 @@ macOS 13.5+ · Apple Silicon / Intel · MIT license
 
 The app opens in English. Choose **Settings → Language → English / 한국어** to switch the interface immediately. Your choice is saved on this device; the macOS menus follow the same language. Company names, project names, and activity records keep their original text. Detailed documentation is currently in Korean.
 
+**New in v0.3.2:** English and Korean support, more reliable activity monitoring, and fixes for fullscreen and independent observation windows. [Release notes](docs/releases/v0.3.2.md)
+
 <p align="center">
   <img src="design/previews/office-team.png" alt="An actual Claude Code session with three agents working at their desks, with model names and activity labels above them." width="720">
 </p>
@@ -115,8 +117,8 @@ Connected projects appear as floors. Select a floor to see its chats together, o
 | Action | Control |
 | --- | --- |
 | Look at a project or agent | Select a floor or a worker |
-| See the whole building | **건물 전체 보기** (Building overview), or `⌘0` in the macOS app |
-| Start or stop automatic observation | **자동 관찰** (Auto observe), or `C` |
+| See the whole building | **Building overview**, or `⌘0` in the macOS app |
+| Start or stop automatic observation | **Auto observe**, or `C` |
 | Stop automatic observation | `Esc` |
 | Rotate the view | Drag |
 | Zoom | Mouse wheel or trackpad pinch |
@@ -129,7 +131,7 @@ Working agents have bright red markers. Waiting agents and unused desks are hidd
 
 The energy cards show **shared account limits**, not an agent's stamina or performance. Click a card for details. Missing values stay unknown; older values are labeled with their observation time, and passing a reset time does not automatically refill them. See [usage sources and limitations](docs/USAGE.md).
 
-To personalize the office, open **설정 → 우리 회사와 사장님** (Settings → Our company and boss), enter the names, and select **이름 저장** (Save names). Defaults are `나의 회사` (My company) and `나` (Me). Names are stored locally, outside the app bundle and repository. Source users can also run `npm run company -- "My studio"` and refresh the page.
+To personalize the office, open **Settings → Your company & owner**, enter the names, and select **Save names**. Defaults are `나의 회사` (My company) and `나` (Me). Names are stored locally, outside the app bundle and repository. Source users can also run `npm run company -- "My studio"` and refresh the page.
 
 ## Supported connections
 
