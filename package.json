@@ -1,6 +1,6 @@
 {
   "name": "cubirumi",
-  "version": "0.3.3",
+  "version": "0.3.4",
   "private": true,
   "description": "A local 3D office for observing Codex and Claude Code agents.",
   "license": "MIT",

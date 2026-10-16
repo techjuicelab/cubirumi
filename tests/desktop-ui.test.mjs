@@ -7,9 +7,12 @@ import { fileURLToPath } from 'node:url';
 import { spawnSync } from 'node:child_process';
 
 const root = dirname(dirname(fileURLToPath(import.meta.url)));
+// A cold macOS SDK module cache on Intel CI can exceed 35 seconds before any harness code runs.
+const nativeCompileTimeout = 120_000;
+const nativeTestTimeout = nativeCompileTimeout + 30_000;
 
 test('native WebKit localizes menus, synchronizes language safely, and retains observation-window behavior', {
-  skip: process.platform !== 'darwin', timeout: 60_000,
+  skip: process.platform !== 'darwin', timeout: nativeTestTimeout,
 }, async t => {
   const directory = await mkdtemp(join(tmpdir(), 'office-native-ui-'));
   t.after(() => rm(directory, { recursive: true, force: true }));
@@ -159,7 +162,7 @@ enum Audit {
     join(root, 'desktop/macos/OfficeLanguage.swift'),
     join(root, 'desktop/macos/OfficeLoginItems.swift'),
     '-framework', 'AppKit', '-framework', 'WebKit', '-o', executable], {
-    encoding: 'utf8', timeout: 35_000, maxBuffer: 1024 * 1024,
+    encoding: 'utf8', timeout: nativeCompileTimeout, maxBuffer: 1024 * 1024,
   });
   assert.equal(compile.status, 0, compile.stderr || compile.error?.message);
   const result = spawnSync(executable, [], { encoding: 'utf8', timeout: 20_000, maxBuffer: 1024 * 1024 });
@@ -169,7 +172,7 @@ enum Audit {
 });
 
 test('native login menu preserves OS choices, reports failures, and only removes recognized legacy startup files', {
-  skip: process.platform !== 'darwin', timeout: 60_000,
+  skip: process.platform !== 'darwin', timeout: nativeTestTimeout,
 }, async t => {
   const directory = await mkdtemp(join(tmpdir(), 'office-login-ui-'));
   t.after(() => rm(directory, { recursive: true, force: true }));
@@ -327,7 +330,7 @@ enum LoginAudit {
     join(root, 'desktop/macos/OfficeLoginItems.swift'), join(root, 'desktop/macos/OfficeLanguage.swift'),
     '-target', `${process.arch === 'arm64' ? 'arm64' : 'x86_64'}-apple-macosx13.0`,
     '-framework', 'AppKit', '-framework', 'ServiceManagement', '-o', executable], {
-    encoding: 'utf8', timeout: 35_000, maxBuffer: 1024 * 1024,
+    encoding: 'utf8', timeout: nativeCompileTimeout, maxBuffer: 1024 * 1024,
   });
   assert.equal(compile.status, 0, compile.stderr || compile.error?.message);
   const result = spawnSync(executable, [directory], { encoding: 'utf8', timeout: 20_000, maxBuffer: 1024 * 1024 });

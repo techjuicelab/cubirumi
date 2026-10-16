@@ -16,7 +16,7 @@ macOS 13.5+ · Apple Silicon / Intel · MIT license
 
 The app opens in English. Choose **Settings → Language → English / 한국어** to switch the interface immediately. Your choice is saved on this device; the macOS menus follow the same language. Company names, project names, and activity records keep their original text. Detailed documentation is currently in Korean.
 
-**New in v0.3.3:** Control **Launch at Login** from the macOS app menu. New installations leave it off, and opening or updating the app does not enable it. [Release notes](docs/releases/v0.3.3.md)
+**New in v0.3.4:** Control **Launch at Login** from the macOS app menu. New installations leave it off, and opening or updating the app does not enable it. [Release notes](docs/releases/v0.3.4.md)
 
 <p align="center">
   <img src="design/previews/office-team.png" alt="An actual Claude Code session with three agents working at their desks, with model names and activity labels above them." width="720">
