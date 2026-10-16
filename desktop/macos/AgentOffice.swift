@@ -20,6 +20,7 @@ final class OfficeApp: NSObject, NSApplicationDelegate, WKNavigationDelegate, WK
     private var status: NSTextField!
     private let runtime = BundledRuntime()
     private let updater: OfficeUpdater
+    private let loginItems: OfficeLoginItems
     private let localization: OfficeLocalization
     private let defaults: UserDefaults
     private var statusMessage: OfficeMessage = .connecting
@@ -31,11 +32,13 @@ final class OfficeApp: NSObject, NSApplicationDelegate, WKNavigationDelegate, WK
     private let showWindow: @MainActor (NSWindow) -> Void
     private let productName = Bundle.main.object(forInfoDictionaryKey: "CFBundleDisplayName") as? String ?? "Agent Office"
 
-    init(defaults: UserDefaults = .standard, showWindow: @escaping @MainActor (NSWindow) -> Void = { $0.makeKeyAndOrderFront(nil) }) {
+    init(defaults: UserDefaults = .standard, loginItems: OfficeLoginItems? = nil,
+         showWindow: @escaping @MainActor (NSWindow) -> Void = { $0.makeKeyAndOrderFront(nil) }) {
         self.defaults = defaults
         let localization = OfficeLocalization(defaults: defaults)
         self.localization = localization
         self.updater = OfficeUpdater(localization: localization)
+        self.loginItems = loginItems ?? OfficeLoginItems(localization: localization)
         self.showWindow = showWindow
         super.init()
     }
@@ -114,6 +117,8 @@ final class OfficeApp: NSObject, NSApplicationDelegate, WKNavigationDelegate, WK
         appMenu.addItem(withTitle: localization.text("About \(productName)", "\(productName)에 관하여"), action: #selector(NSApplication.orderFrontStandardAboutPanel(_:)), keyEquivalent: "")
         appMenu.addItem(.separator())
         updater.appendMenuItems(to: appMenu)
+        appMenu.addItem(.separator())
+        loginItems.appendMenuItems(to: appMenu)
         appMenu.addItem(.separator())
         appMenu.addItem(withTitle: localization.text("Hide \(productName)", "\(productName) 가리기"), action: #selector(NSApplication.hide(_:)), keyEquivalent: "h")
         appMenu.addItem(.separator())
@@ -336,6 +341,7 @@ final class OfficeApp: NSObject, NSApplicationDelegate, WKNavigationDelegate, WK
     func applicationShouldHandleReopen(_ sender: NSApplication, hasVisibleWindows flag: Bool) -> Bool {
         showWindow(window); return true
     }
+    func applicationDidBecomeActive(_ notification: Notification) { loginItems.refresh() }
     func applicationShouldTerminate(_ sender: NSApplication) -> NSApplication.TerminateReply {
         guard runtime.isBundled else { return .terminateNow }
         guard !terminationPending else { return .terminateLater }

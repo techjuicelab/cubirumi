@@ -157,6 +157,7 @@ enum Audit {
   const compile = spawnSync('xcrun', ['swiftc', '-parse-as-library', source,
     join(root, 'desktop/macos/BundledRuntime.swift'), join(root, 'desktop/macos/OfficeUpdater.swift'),
     join(root, 'desktop/macos/OfficeLanguage.swift'),
+    join(root, 'desktop/macos/OfficeLoginItems.swift'),
     '-framework', 'AppKit', '-framework', 'WebKit', '-o', executable], {
     encoding: 'utf8', timeout: 35_000, maxBuffer: 1024 * 1024,
   });
@@ -165,4 +166,171 @@ enum Audit {
   assert.equal(result.status, 0, result.stderr || result.error?.message);
   assert.match(result.stdout, /NATIVE_UI fullscreen=true independent_windows=2 external_popup=false close_releases_delegates=true/);
   assert.match(result.stdout, /NATIVE_LANGUAGE default=en persisted=true windows_synchronized=2 origin_guard=true preferences_preserved=true/);
+});
+
+test('native login menu preserves OS choices, reports failures, and only removes recognized legacy startup files', {
+  skip: process.platform !== 'darwin', timeout: 60_000,
+}, async t => {
+  const directory = await mkdtemp(join(tmpdir(), 'office-login-ui-'));
+  t.after(() => rm(directory, { recursive: true, force: true }));
+  const source = join(directory, 'LoginItems.swift'), executable = join(directory, 'login-items');
+  await writeFile(source, String.raw`
+import AppKit
+import ServiceManagement
+
+enum LoginAuditFailure: Error { case failed(String), simulated }
+
+@main
+enum LoginAudit {
+    @MainActor static func check(_ condition: Bool, _ message: String) throws {
+        if !condition { throw LoginAuditFailure.failed(message) }
+    }
+    @MainActor static func main() throws {
+        let application = NSApplication.shared
+        application.setActivationPolicy(.prohibited)
+        let suite = "io.cubirumi.login-audit.\(UUID().uuidString)"
+        let defaults = UserDefaults(suiteName: suite)!
+        defer { defaults.removePersistentDomain(forName: suite) }
+        let localization = OfficeLocalization(defaults: defaults)
+        var status: SMAppService.Status = .notRegistered
+        var legacy: OfficeLegacyLoginStatus = .absent
+        var registers = 0, unregisters = 0, legacyDisables = 0, settingsOpened = 0, errors = 0
+        var failRegister = false, failUnregister = false, failLegacy = false
+        var registrationResult: SMAppService.Status = .enabled
+        let items = OfficeLoginItems(localization: localization, serviceStatus: { status }, register: {
+            registers += 1
+            if failRegister { throw LoginAuditFailure.simulated }
+            status = registrationResult
+        }, unregister: {
+            unregisters += 1
+            if failUnregister { throw LoginAuditFailure.simulated }
+            status = .notRegistered
+        }, legacyStatus: { legacy }, disableLegacy: {
+            legacyDisables += 1
+            if failLegacy { throw LoginAuditFailure.simulated }
+            legacy = .absent
+        }, openSettings: { settingsOpened += 1 }, reportError: { _ in errors += 1 })
+        let menu = NSMenu()
+        items.appendMenuItems(to: menu)
+        let toggle = menu.item(at: 0)!, settings = menu.item(at: 1)!
+        func click() { application.sendAction(toggle.action!, to: toggle.target, from: toggle) }
+        try check(toggle.state == .off && registers == 0 && unregisters == 0 && legacyDisables == 0,
+                  "first launch changed system registration instead of defaulting to off")
+        status = .enabled
+        _ = items.validateMenuItem(toggle)
+        try check(toggle.state == .on && registers == 0 && unregisters == 0, "OS choice was overwritten or not refreshed")
+        failUnregister = true
+        click()
+        try check(toggle.state == .on && errors == 1 && unregisters == 1, "unregister failure was hidden or displayed off")
+        failUnregister = false
+        click()
+        try check(toggle.state == .off && unregisters == 2, "enabled login item was not disabled")
+        failRegister = true
+        click()
+        try check(toggle.state == .off && errors == 2 && registers == 1, "registration failure was hidden or displayed enabled")
+        failRegister = false
+        registrationResult = .requiresApproval
+        click()
+        try check(toggle.state == .mixed && toggle.title.contains("Approval Required") && settingsOpened == 1,
+                  "approval-required status was reported as enabled or no guidance was offered")
+        click()
+        try check(toggle.state == .off && unregisters == 3 && registers == 2, "approval-pending item could not be unregistered")
+        registrationResult = .notRegistered
+        click()
+        try check(toggle.state == .off && errors == 3, "unchanged OS state was reported as registration success")
+        status = .notFound
+        items.refresh()
+        try check(toggle.state == .off && toggle.toolTip?.contains("could not find") == true, "missing service had no explanation")
+        status = .notRegistered
+        legacy = .configured
+        items.refresh()
+        try check(toggle.state == .mixed && toggle.title.contains("Legacy Setup"), "legacy startup was falsely displayed off")
+        failLegacy = true
+        click()
+        try check(toggle.state == .mixed && errors == 4 && legacyDisables == 1, "legacy removal failure was hidden")
+        failLegacy = false
+        click()
+        try check(toggle.state == .off && legacyDisables == 2 && registers == 3, "legacy toggle registered another startup item")
+        application.sendAction(settings.action!, to: settings.target, from: settings)
+        try check(settingsOpened == 2, "Login Item Settings action did not open settings")
+        _ = localization.setLanguage(.ko)
+        let koreanMenu = NSMenu()
+        items.appendMenuItems(to: koreanMenu)
+        try check(koreanMenu.item(at: 0)?.title == "로그인 시 실행" && koreanMenu.item(at: 1)?.title == "로그인 항목 설정…", "Korean login menu is missing")
+
+        let files = FileManager.default
+        let home = URL(fileURLWithPath: CommandLine.arguments[1]).appendingPathComponent("synthetic-home")
+        let plist = home.appendingPathComponent("Library/LaunchAgents/io.cubirumi.login.plist")
+        try files.createDirectory(at: plist.deletingLastPathComponent(), withIntermediateDirectories: true)
+        let dictionary: [String: Any] = ["Label": "io.cubirumi.login", "ProgramArguments": ["/usr/bin/open", "-g", "/Applications/Cubirumi.app"], "RunAtLoad": true, "KeepAlive": false]
+        let original = try PropertyListSerialization.data(fromPropertyList: dictionary, format: .xml, options: 0)
+        var commands: [[String]] = []
+        var bootoutStatus: Int32 = 0, printStatus: Int32 = 0
+        var replaceDuringStop = false
+        let legacyItem = OfficeLegacyLoginItem(home: home, launchctl: { arguments in
+            commands.append(arguments)
+            if arguments[0] == "bootout" {
+                if replaceDuringStop { try Data("replaced".utf8).write(to: plist) }
+                return bootoutStatus
+            }
+            return printStatus
+        })
+        try check(legacyItem.status == .absent, "absent legacy setup was not recognized")
+        try original.write(to: plist)
+        try check(legacyItem.status == .configured, "known legacy setup was not recognized")
+        try legacyItem.disable()
+        try check(legacyItem.status == .absent && commands.count == 1 && commands[0] == ["bootout", "gui/\(getuid())/io.cubirumi.login"], "legacy cleanup touched another service or left startup enabled")
+        let backups = home.appendingPathComponent("Library/Application Support/AgentOffice/login-item-backups")
+        let backupDirectory = try files.contentsOfDirectory(at: backups, includingPropertiesForKeys: nil)[0]
+        try check(try Data(contentsOf: backupDirectory.appendingPathComponent(plist.lastPathComponent)) == original, "legacy startup was removed without preserving a backup")
+        try original.write(to: plist)
+        bootoutStatus = 1
+        do { try legacyItem.disable(); throw LoginAuditFailure.failed("failed bootout was ignored") }
+        catch OfficeLoginError.legacyStopFailed {}
+        try check(try Data(contentsOf: plist) == original, "failed bootout removed the startup file")
+        bootoutStatus = 113; printStatus = 113
+        try legacyItem.disable()
+        try check(legacyItem.status == .absent, "already-unloaded legacy setup could not be disabled")
+        for changed in [
+            ["Label": "another.service"],
+            ["Program": "/usr/bin/another-program"],
+            ["ProgramArguments": ["/usr/bin/open", "-g", "/Applications/Another.app"]],
+            ["ProgramArguments": ["/usr/bin/open", "/Applications/Cubirumi.app"]],
+            ["ProgramArguments": ["/usr/bin/another-program", "-g", "/Applications/Cubirumi.app"]],
+        ] as [[String: Any]] {
+            var unrecognized = dictionary
+            unrecognized.merge(changed) { _, replacement in replacement }
+            let data = try PropertyListSerialization.data(fromPropertyList: unrecognized, format: .xml, options: 0)
+            try data.write(to: plist)
+            let count = commands.count
+            try check(legacyItem.status == .unrecognized, "unrelated legacy file was recognized as ours")
+            do { try legacyItem.disable(); throw LoginAuditFailure.failed("unrecognized legacy file was removed") }
+            catch OfficeLoginError.unrecognizedLegacy {}
+            try check(commands.count == count && (try Data(contentsOf: plist)) == data, "unrecognized legacy file was modified")
+        }
+        try files.removeItem(at: plist)
+        let target = home.appendingPathComponent("symlink-target.plist")
+        try original.write(to: target)
+        try files.createSymbolicLink(at: plist, withDestinationURL: target)
+        try check(legacyItem.status == .unrecognized, "symlink legacy file was accepted")
+        try files.removeItem(at: plist)
+        try original.write(to: plist)
+        bootoutStatus = 0; replaceDuringStop = true
+        do { try legacyItem.disable(); throw LoginAuditFailure.failed("changed legacy file was removed") }
+        catch OfficeLoginError.legacyChanged {}
+        try check(try Data(contentsOf: plist) == Data("replaced".utf8), "changed legacy file was not preserved")
+        print("NATIVE_LOGIN default_off=true os_choices_preserved=true approval=true failures_visible=true legacy_backup=true legacy_matching=true no_system_mutation=true")
+    }
+}
+`);
+  const compile = spawnSync('xcrun', ['swiftc', '-parse-as-library', source,
+    join(root, 'desktop/macos/OfficeLoginItems.swift'), join(root, 'desktop/macos/OfficeLanguage.swift'),
+    '-target', `${process.arch === 'arm64' ? 'arm64' : 'x86_64'}-apple-macosx13.0`,
+    '-framework', 'AppKit', '-framework', 'ServiceManagement', '-o', executable], {
+    encoding: 'utf8', timeout: 35_000, maxBuffer: 1024 * 1024,
+  });
+  assert.equal(compile.status, 0, compile.stderr || compile.error?.message);
+  const result = spawnSync(executable, [directory], { encoding: 'utf8', timeout: 20_000, maxBuffer: 1024 * 1024 });
+  assert.equal(result.status, 0, result.stderr || result.error?.message);
+  assert.match(result.stdout, /NATIVE_LOGIN default_off=true os_choices_preserved=true approval=true failures_visible=true legacy_backup=true legacy_matching=true no_system_mutation=true/);
 });
